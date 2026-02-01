@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-02-01T18:01:09.360371",
+  "history": [
+    {
+      "turn": 1,
+      "player": 0,
+      "type": "MOVE",
+      "steps": 4,
+      "to": 4
+    },
+    {
+      "turn": 2,
+      "player": 1,
+      "type": "MOVE",
+      "steps": 2,
+      "to": 2
+    }
+  ]
+}
