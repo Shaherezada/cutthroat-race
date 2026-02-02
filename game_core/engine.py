@@ -118,8 +118,6 @@ class GameEngine:
                 player.position = cell.portal_target
             else:
                 self._handle_landing(player)
-        else:
-            self.state.next_turn()
 
     def _handle_landing(self, player: Player):
         cell = self.board.get_cell(player.position)
@@ -222,17 +220,21 @@ class GameEngine:
 
             # Правила, требующие сложной проверки контекста
             if eid == "rule_six_skip":
-                raise NotImplementedError(
-                    "Та-Дам 'проклятие шестерки': Нужна проверка грани '6' в последнем броске")
+                pass  # Уже обработано в get_roll()
 
             if eid == "rule_overtake_steal":
-                raise NotImplementedError(
-                    "Та-Дам 'карманник': Нужна проверка пересечения координат игроков")
+                pass  # Уже обработано в move_player()
 
             if rule.effect_id == "rule_collision_duel":
                 for other in self.state.players:
                     if other.uid != player.uid and other.position == player.position:
-                        raise NotImplementedError("Та-Дам 'агрессия': Автоматический запуск Схватки при наступании на игрока")
+                        opponents = [other]
+                        self.pending_events.append(GameEvent(
+                            type="DUEL_CHOOSE_OPPONENT",
+                            player=player,
+                            data={"opponents": opponents}
+                        ))
+                        break
 
     def _trigger_cell_effect(self, player: Player, cell):
         """Логика конкретных типов клеток."""
@@ -636,8 +638,6 @@ class GameEngine:
 
         # Пассивные карты нельзя активировать кнопкой
         if card.is_passive: return False
-        if card_idx in player.used_cards_indices: return False
-        if not player.pay(card.use_cost): return False
 
         if card_idx in player.used_cards_indices: return False
         if not player.pay(card.use_cost): return False
