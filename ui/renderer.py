@@ -89,7 +89,8 @@ class Renderer:
                 txt = self.font.render(str(player.uid + 1), True, (255, 255, 255))
                 self.screen.blit(txt, (final_pos[0] - 5, final_pos[1] - 10))
 
-    def draw_sidebar(self, state: GameState, turn_count: int, elapsed_seconds: int):
+    def draw_sidebar(self, state: GameState, turn_count: int, elapsed_seconds: int,
+                     can_do_actions: bool = False, has_pending: bool = False):
         """Отрисовка правой информационной интерактивной панели"""
         sidebar_rect = pygame.Rect(self.view_cfg.target_size, 0, 300, self.view_cfg.target_size)
         pygame.draw.rect(self.screen, (40, 40, 45), sidebar_rect)
@@ -140,7 +141,8 @@ class Renderer:
 
         # 3. Кнопка завершения хода
         p = state.current_player
-        if p.has_moved:
+        show_button = p.has_moved and not has_pending and can_do_actions
+        if show_button:
             btn_rect = pygame.Rect(self.view_cfg.target_size + 50, 850, 200, 60)
             pygame.draw.rect(self.screen, (200, 50, 50), btn_rect, border_radius=10)
             pygame.draw.rect(self.screen, (255, 255, 255), btn_rect, 2, border_radius=10)

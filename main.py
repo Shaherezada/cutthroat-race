@@ -92,12 +92,14 @@ def main():
             if viewing_card_sprite_id:
                 if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1) or \
                    (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                    # Если pending_tadam_rule есть - это новое правило, нужен resolve
                     if pending_tadam_rule:
                         engine.resolve_tadam_choice(pending_tadam_rule)
-                        pending_tadam_rule = None
                         engine.pending_events.pop(0)
+                        pending_tadam_rule = None
+                    # Если None - просто смотрели активное правило
                     viewing_card_sprite_id = None
-                continue
+                    continue
 
             # Выбор карт
             if engine.pending_events and not active_dialog:
@@ -126,7 +128,7 @@ def main():
                                 engine.move_player(p, steps)
                                 logger.log_event(p.uid, "MOVE", {"steps": steps, "to": p.position})
                                 active_dialog = None
-                            elif "карта" in title:  # Сундучки
+                            elif "Карта" in title:  # Сундучки
                                 engine.resolve_event_card(p, pending_event_card, pending_event_is_good)
                                 active_dialog = None
                                 engine.pending_events.pop(0)
@@ -199,6 +201,19 @@ def main():
                             else:
                                 raise NotImplementedError("Если врагов много - нужен диалог")
 
+                # Клик по карте Та-Дам
+                if not active_dialog and not viewing_card_sprite_id:
+                    for i, rule in enumerate(engine.state.active_rules):
+                        slot_key = f'slot_{i}'
+                        pos = view_cfg.get_screen_coords(slot_key)
+                        sprite = renderer.rule_sprites_small[rule.sprite_id]
+                        rect = sprite.get_rect(center=pos)
+
+                        if rect.collidepoint(mouse_pos):
+                            viewing_card_sprite_id = rule.sprite_id
+                            pending_tadam_rule = None
+                            break
+
         # Отрисовка
         screen.fill((30, 30, 30))
         renderer.draw_board()
@@ -214,7 +229,9 @@ def main():
             renderer.draw_hover(mouse_pos)
             if active_dialog: active_dialog.draw(screen)
 
-        renderer.draw_sidebar(engine.state, turn_count, elapsed_seconds)
+        can_act = engine.can_player_do_actions(p) if p.has_moved else False
+        has_pending = bool(engine.pending_events or active_dialog or viewing_card_sprite_id)
+        renderer.draw_sidebar(engine.state, turn_count, elapsed_seconds, can_act, has_pending)
         pygame.display.flip()
         clock.tick(60)
 
