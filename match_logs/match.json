@@ -1,19 +1,25 @@
 {
-  "timestamp": "2026-02-01T18:01:09.360371",
+  "timestamp": "2026-02-03T16:05:59.285698",
   "history": [
     {
       "turn": 1,
       "player": 0,
       "type": "MOVE",
-      "steps": 4,
-      "to": 4
+      "steps": 1,
+      "to": 11
     },
     {
       "turn": 2,
       "player": 1,
       "type": "MOVE",
-      "steps": 2,
-      "to": 2
+      "steps": 6,
+      "to": 6
+    },
+    {
+      "turn": 2,
+      "player": 1,
+      "type": "CARD_USE",
+      "card": "рука судьбы"
     }
   ]
 }

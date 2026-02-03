@@ -223,11 +223,12 @@ class Renderer:
             self.screen.blit(sprite, rect)
 
         # Кнопка "Пропустить"
-        skip_btn = pygame.Rect(self.view_cfg.target_size // 2 - 100, 800, 200, 50)
+        skip_btn = pygame.Rect(self.view_cfg.target_size // 2 - 100, 700, 200, 50)
         is_skip_hover = skip_btn.collidepoint(mouse_pos)
         pygame.draw.rect(self.screen, (150, 50, 50) if is_skip_hover else (100, 30, 30), skip_btn, border_radius=10)
         txt = self.font.render("Пропустить", True, (255, 255, 255))
-        self.screen.blit(txt, (skip_btn.centerx - txt.get_width() // 2, skip_btn.centery - txt.get_width() // 2))
+        self.screen.blit(txt, (skip_btn.centerx - txt.get_width() // 2,
+                                    skip_btn.centery - txt.get_height() // 2 - 1))
 
         card_rects.append(skip_btn)
         return card_rects

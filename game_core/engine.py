@@ -395,10 +395,15 @@ class GameEngine:
             card = cards[choice_idx]
             if player.pay(5):
                 player.add_card(card)
+                self.logger.log_event(player.uid, "SHOP_BUY", {
+                    "card": card.name,
+                    "cost": 5
+                })
             self.state.deck_shop.discard(cards[1 - choice_idx]) # вторую карту в сброс?
         else:
             for c in cards:
                 self.state.deck_shop.discard(c)
+            self.logger.log_event(player.uid, "SHOP_SKIP", {})
 
     def resolve_duel_opponent(self, attacker: Player, defender: Player):
         """
