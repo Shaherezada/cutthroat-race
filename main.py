@@ -24,6 +24,7 @@ def main():
     pending_shop_cards = []  # Храним карты, предложенные Лавкой
     pending_event_card = None  # Храним текущую карту события
     pending_event_is_good = True  # Какую сторону показывать
+    pending_tadam_rule = None
     viewing_card_sprite_id = None
     pending_tornado_target = None
     pending_move_options = []
@@ -48,6 +49,7 @@ def main():
         # 1. Обработка очереди событий (делаем это только если сейчас нет активных окон)
         if engine.pending_events and not active_dialog and not viewing_card_sprite_id:
             game_event = engine.pending_events[0]  # Просто смотрим первое событие
+            event_player = game_event.player
             if game_event.type == "SHOP":
                 pending_shop_cards = game_event.data["cards"]
                 # pending_selection_rects возвращает draw_card_selector()
@@ -56,26 +58,31 @@ def main():
                 pending_event_is_good = game_event.data["is_good"]
                 side = pending_event_card.good_side if pending_event_is_good else pending_event_card.bad_side
                 title = "Карта Хорошо" if pending_event_is_good else "Карта Плохо"
-                active_dialog = Dialog(f"{title}: {side.name.upper()}", [side.description, "ОК"])
+                active_dialog = Dialog(
+                    f"{event_player.name}: {title}: {side.name.upper()}",
+                  [side.description, "ОК"]
+                )
             elif game_event.type == "TADAM_SHOW":
                 pending_tadam_rule = game_event.data["rule"]
                 viewing_card_sprite_id = pending_tadam_rule.sprite_id
             elif game_event.type == "DUEL_CHOOSE_OPPONENT":
                 options = [f'Драться с {opp.name}' for opp in game_event.data["opponents"]]
-                active_dialog = Dialog("Выбери противника для схватки", options)
+                active_dialog = Dialog(f"{event_player.name}: Выбери противника для схватки", options)
             elif game_event.type == "DUEL_CHOOSE_REWARD":
                 duel_defender = game_event.data["loser"]
-                active_dialog = Dialog(f"Победа! ({game_event.data['atk_roll']} vs {game_event.data['def_roll']})",
-                                       ["Забрать 10 монет", "Откинуть на 10 клеток", "Забрать карту Лавки"])
+                active_dialog = Dialog(
+                    f"{event_player.name}: Победа! ({game_event.data['atk_roll']} vs {game_event.data['def_roll']})",
+                 ["Забрать 10 монет", "Откинуть на 10 клеток", "Забрать карту Лавки"]
+                )
             elif game_event.type == "TORNADO_DECISION":
                 pending_tornado_target = game_event.data["target_pos"]
-                active_dialog = Dialog(f"Смерч: {game_event.player.name}", ["Откупиться (10 монет)", "Лететь к Смерчу!"])
+                active_dialog = Dialog(f"Смерч: {event_player.name}", ["Откупиться (10 монет)", "Лететь к Смерчу!"])
             elif game_event.type == "CHOOSE_TARGET":
                 options = [f"{opp.name}" for opp in game_event.data["opponents"]]
-                active_dialog = Dialog("Выбери цель", options)
+                active_dialog = Dialog(f"{event_player}: Выбери цель", options)
             elif game_event.type == "CHOOSE_CARD_TO_DISCARD":
                 options = [f"{c.name}" for c in game_event.data["cards"]]
-                active_dialog = Dialog(f"Сбрось карту у {game_event.data['target'].name}", options)
+                active_dialog = Dialog(f"{event_player}: Сбрось карту у {game_event.data['target'].name}", options)
 
         if p.has_moved and not engine.pending_events and not active_dialog and not viewing_card_sprite_id:
             if not engine.can_player_do_actions(p):
@@ -130,7 +137,8 @@ def main():
                                 logger.log_event(p.uid, "MOVE", {"steps": steps, "to": p.position})
                                 active_dialog = None
                             elif "Карта" in title:  # Сундучки
-                                engine.resolve_event_card(p, pending_event_card, pending_event_is_good)
+                                game_event = engine.pending_events[0]
+                                engine.resolve_event_card(game_event.player, pending_event_card, pending_event_is_good)
                                 active_dialog = None
                                 engine.pending_events.pop(0)
                             elif "противника" in title:  # Схватка

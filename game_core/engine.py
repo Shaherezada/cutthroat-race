@@ -380,11 +380,14 @@ class GameEngine:
         elif ctype == CellType.FINISH_SAFE:
             player.is_finished = True
 
+        elif ctype == CellType.RED or ctype == CellType.GREEN:
+            pass  # Зелёные и красные клетки обрабатываются через правила Та-Дам
+
         elif ctype == CellType.EMPTY:
             pass
 
         else:
-            raise Exception("КУДА МЫ ВСТАЛИ БЛ?Ё!")
+            raise Exception(f"КУДА МЫ ВСТАЛИ БЛ?Ё! тип клетки: {ctype}")
 
     def resolve_shop_choice(self, player: Player, cards: List[ShopCard], choice_idx: int):
         """Разрешение выбора в Лавке Джо (0, 1 - купить, 2 - сбросить)"""
@@ -644,6 +647,7 @@ class GameEngine:
                 source.add_coins(amount)
                 self.logger.log_event(source.uid, "EFFECT_STEAL", {
                     "from": target.name,
+                    "target_uid": target.uid,
                     "amount": amount
                 })
 
@@ -654,6 +658,11 @@ class GameEngine:
                 player=target,
                 data={"card": card, "is_good": False}
             ))
+            self.logger.log_event(source.uid, "EFFECT_FORCE_DRAW_BAD", {
+                "target": target.name,
+                "target_uid": target.uid,
+                "card": card.bad_side.name
+            })
 
         elif effect_id == "discard_enemy_shop_card":
             if not target.hand:
