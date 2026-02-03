@@ -79,6 +79,7 @@ def main():
 
         if p.has_moved and not engine.pending_events and not active_dialog and not viewing_card_sprite_id:
             if not engine.can_player_do_actions(p):
+                engine.end_turn_checks(p)
                 engine.state.next_turn()
                 turn_count += 1
 
@@ -176,6 +177,7 @@ def main():
                 if p.has_moved and not engine.pending_events:
                     btn_rect = pygame.Rect(WINDOW_SIZE + 50, 850, 200, 60)
                     if btn_rect.collidepoint(mouse_pos):
+                        engine.end_turn_checks(p)
                         engine.state.next_turn()
                         turn_count += 1
                         continue

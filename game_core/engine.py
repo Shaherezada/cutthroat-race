@@ -35,6 +35,16 @@ class GameEngine:
         count = 2 if 24 <= pos <= 97 else 1
         rolls = [random.randint(1, 6) for _ in range(count)]
 
+        # Та-Дам "дубль-ход"
+        if count == 2 and rolls[0] == rolls[1]:
+            for rule in self.state.active_rules:
+                if rule.effect_id == "rule_double_reroll":
+                    # TODO: дать повторный ход (main.py)
+                    self.logger.log_event(player.uid, "RULE_TRIGGER", {
+                        "rule": rule.name, "rolls": rolls
+                    })
+                    raise NotImplementedError("Правило: 'дубль ход': требуется механика повторного хода")
+
         # Та-Дам "проклятие шестёрки"
         if any(r == 6 for r in rolls):
             for rule in self.state.active_rules:
@@ -179,6 +189,26 @@ class GameEngine:
                     }))
                     self.logger.log_event(player.uid, "RULE_TRIGGER", {"rule": rule.name})
 
+    def end_turn_checks(self, player: Player):
+        """Правила, действующие в конце хода игрока"""
+        is_last = self._is_last(player)
+
+        for rule in self.state.active_rules:
+            eid = rule.effect_id
+
+            if is_last:
+                if eid == "rule_last_dice_coins":
+                    roll = random.randint(1, 6)
+                    player.add_coins(roll)
+                    self.logger.log_event(player.uid, "RULE_TRIGGER", {
+                        "rule": rule.name, "roll": roll, "gain": roll
+                    })
+
+                elif eid == "rule_last_move_5":
+                    self.move_player(player, rule.value)
+                    self.logger.log_event(player.uid, "RULE_TRIGGER", {
+                        "rule": rule.name, "move": rule.value
+                    })
 
     def _check_global_rules(self, player: Player, cell):
         """Проверка правил Та-Дам после броска на передвижение."""
@@ -444,8 +474,17 @@ class GameEngine:
                     self.state.deck_shop.discard(card)
 
     def resolve_event_card(self, player: Player, card: EventCard, is_good: bool):
-        """Применяет эффект карты события и завершает ход (или запускает новый лендинг)"""
+        """Разыгрывает карту из сундучка"""
         side = card.good_side if is_good else card.bad_side
+
+        # Логируем карту ДО применения эффекта
+        self.logger.log_event(player.uid, "EVENT_CARD", {
+            "type": "Хорошо" if is_good else "Плохо",
+            "name": side.name,
+            "effect": side.effect_id,
+            "value": side.value,
+        })
+
         self.apply_effect(side.effect_id, player, side.value)
         self.state.deck_events.discard(card)
 
@@ -461,6 +500,9 @@ class GameEngine:
         elif effect_id == "move_self_forward": self.move_player(source, value)
         elif effect_id == "move_self_back": self.move_player(source, value, is_forward=False)
         elif effect_id == "no_effect": pass
+        elif effect_id == "move_forward_gain_coins":
+            self.move_player(source, value)
+            source.add_coins(value)
 
         # --- СЛОЖНЫЕ ПЕРЕМЕЩЕНИЯ ---
         elif effect_id == "move_nearest_green":
@@ -499,7 +541,32 @@ class GameEngine:
         elif effect_id == "all_lose_coins_global":
             for p in self.state.players: p.pay(value)
 
+        elif effect_id == "others_gain_coins_move":
+            for p in self.state.players:
+                if p.uid != source.uid:
+                    p.add_coins(value)
+                    self.move_player(p, value)
+
+        elif effect_id == "steal_2_from_all":
+            for p in self.state.players:
+                if p.uid != source.uid:
+                    amount = min(p.coins, value)
+                    if p.pay(amount):
+                        source.add_coins(amount)
+
+        elif effect_id == "draw_2_bad":
+            for _ in range(2):
+                card = self.state.deck_events.draw(1)[0]
+                self.pending_events.append(GameEvent(
+                    type="EVENT_CARD",
+                    player=source,
+                    data={"card": card, "is_good": False}
+                ))
+
         # --- ЭФФЕКТЫ С ВЫБОРОМ (UI REQUIRED) ---
+        elif effect_id == "give_double_turn_enemy":
+            raise NotImplementedError("Событие 'благородство': требуется механика двойного хода в UI")
+
         elif effect_id == "steal_shop_card_leader":
             raise NotImplementedError("Нужен выбор карты Лавки у лидера в UI")
 
@@ -546,7 +613,7 @@ class GameEngine:
 
         # target required
         elif effect_id in ["steal_coins_target", "force_enemy_draw_bad", "discard_enemy_shop_card", "roll_push_enemy",
-                           "give_5_to_target", "give_10_to_target"]:
+                           "give_5_to_target", "give_10_to_target", "force_enemy_lose_coins", "give_double_turn_enemy"]:
             opponents = [p for p in self.state.players if p.uid != source.uid]
             if target:
                 self._execute_targeted_logic(effect_id, source, target, value)
@@ -575,7 +642,7 @@ class GameEngine:
             amount = min(target.coins, value)
             if target.pay(amount):
                 source.add_coins(amount)
-                self.logger.log_event(source.uid, "EFFECT_STEAL", { # Переделать логгер, чтобы он сам знал какой ход
+                self.logger.log_event(source.uid, "EFFECT_STEAL", {
                     "from": target.name,
                     "amount": amount
                 })
@@ -606,6 +673,25 @@ class GameEngine:
                     data={"target": target, "cards": target.hand}
                 ))
 
+        elif effect_id == "roll_push_enemy":
+            if not target:
+                opponents = [p for p in self.state.players if p.uid != source.uid]
+                if len(opponents) == 1:
+                    target = opponents[0]
+                else:
+                    self.pending_events.append(GameEvent(
+                        type="CHOOSE_TARGET",
+                        player=source,
+                        data={'effect_id': effect_id, "value": 0, "opponents": opponents}
+                    ))
+                    return
+
+            roll = random.randint(1, 6)
+            self.move_player(target, roll)
+            self.logger.log_event(source.uid, "EFFECT_PUSH", {
+                "target": target.name, "roll": roll
+            })
+
         elif effect_id == "give_5_to_target" or effect_id == "give_10_to_target":
             if value == 10: target.add_coins(value)
             elif source.pay(value):
@@ -620,6 +706,25 @@ class GameEngine:
                 self.logger.log_event(source.uid, "EFFECT_GIVE", {
                     "to": target.name, "amount": amount
                 })
+
+        elif effect_id == "force_enemy_lose_coins":
+            opponents = [p for p in self.state.players if p.uid != source.uid]
+            if target:
+                target.pay(value)
+                self.logger.log_event(source.uid, "EFFECT_FORCE_LOSE", {
+                    "target": target.name, "amount": value
+                })
+            elif len(opponents) == 1:
+                opponents[0].pay(value)
+            else:
+                self.pending_events.append(GameEvent(
+                    type="CHOOSE_TARGET",
+                    player=source,
+                    data={'effect_id': effect_id, "value": value, "opponents": opponents}
+                ))
+
+        elif effect_id == "give_double_turn_enemy":
+            raise NotImplementedError("Событие 'благородство': требуется механика двойного хода в UI")
 
     def resolve_target_choice(self, source: Player, target_uid: int, effect_id: str, value: int):
         target = next(p for p in self.state.players if p.uid == target_uid)

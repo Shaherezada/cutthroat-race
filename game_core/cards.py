@@ -158,7 +158,7 @@ class CardLibrary:
             RuleCard("rule_last_aid", "помощь отстающим",
                  description="Последний игрок в начале хода тащит бесплатную "
                                 "карту Лавка Джо, если у него их меньше трёх.",
-                 effect_id="rule_last_player_draw", sprite_id=7),
+                 effect_id="rule_last_aid", sprite_id=7),
 
             RuleCard("rule_double_move", "дубль-ход",
                  description="Если выпал дубль, походи еще раз.",
