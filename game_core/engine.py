@@ -136,7 +136,10 @@ class GameEngine:
         if player.position in self.placed_mines:
             self.placed_mines.pop(player.position)
             player.skip_next_turn = True
-            return
+            self.logger.log_event(player.uid, "MINE_TRIGGERED", {
+                "position": player.position
+            })
+            return # Эффект клетки не срабатывает
 
         # 2. Проверка пассивных предметов Лавки Джо
         self._check_passives(player, cell)
@@ -164,6 +167,14 @@ class GameEngine:
 
     def start_turn_checks(self, player: Player):
         """Для правил, действующих в начале хода (бонусы отстающим и т.д.)"""
+        # Проверка пропуска хода
+        if player.skip_next_turn:
+            player.skip_next_turn = False
+            self.logger.log_event(player.uid, "TURN_SKIPPED", {})
+            # Завершаем ход немедленно
+            self.state.next_turn()
+            return True
+
         is_last = self._is_last(player)
 
         for rule in self.state.active_rules:
@@ -188,6 +199,8 @@ class GameEngine:
                         "is_good": True
                     }))
                     self.logger.log_event(player.uid, "RULE_TRIGGER", {"rule": rule.name})
+
+        return False
 
     def end_turn_checks(self, player: Player):
         """Правила, действующие в конце хода игрока"""
@@ -575,9 +588,6 @@ class GameEngine:
         elif effect_id == "give_double_turn_enemy":
             raise NotImplementedError("Событие 'благородство': требуется механика двойного хода в UI")
 
-        elif effect_id == "steal_shop_card_leader":
-            raise NotImplementedError("Нужен выбор карты Лавки у лидера в UI")
-
         elif effect_id == "pay_coins_move_flexible":
             raise NotImplementedError("Нужен ввод кол-ва монет (1-5) в UI")
 
@@ -621,8 +631,15 @@ class GameEngine:
 
         # target required
         elif effect_id in ["steal_coins_target", "force_enemy_draw_bad", "discard_enemy_shop_card", "roll_push_enemy",
-                           "give_5_to_target", "give_10_to_target", "force_enemy_lose_coins", "give_double_turn_enemy"]:
-            opponents = [p for p in self.state.players if p.uid != source.uid]
+                           "give_5_to_target", "give_10_to_target", "force_enemy_lose_coins", "give_double_turn_enemy",
+                           "steal_shop_card_leader"]:
+            if effect_id == "steal_shop_card_leader":
+                opponents = [p for p in self.state.players if p.uid != source.uid and p.position > source.position]
+                if not opponents:
+                    return
+            else:
+                opponents = [p for p in self.state.players if p.uid != source.uid]
+
             if target:
                 self._execute_targeted_logic(effect_id, source, target, value)
                 return
@@ -739,6 +756,25 @@ class GameEngine:
 
         elif effect_id == "give_double_turn_enemy":
             raise NotImplementedError("Событие 'благородство': требуется механика двойного хода в UI")
+
+        elif effect_id == "steal_shop_card_leader":
+            if not target.hand:
+                return
+
+            if len(target.hand) == 1:
+                card = target.remove_card(0)
+                if source.add_card(card):
+                    self.logger.log_event(source.uid, "EFFECT_STEAL_CARD", {
+                        "target": target.name, "card": card.name
+                    })
+                else:
+                    self.state.deck_shop.discard(card)
+            else:
+                self.pending_events.append(GameEvent(
+                    type="CHOOSE_CARD_TO_DISCARD",
+                    player=source,
+                    data={"target": target, "cards": target.hand}
+                ))
 
     def resolve_target_choice(self, source: Player, target_uid: int, effect_id: str, value: int):
         target = next(p for p in self.state.players if p.uid == target_uid)

@@ -168,7 +168,10 @@ def main():
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                 if not engine.pending_events and not p.has_moved:
-                    engine.start_turn_checks(p)
+                    turn_skipped = engine.start_turn_checks(p)
+                    if turn_skipped:
+                        turn_count += 1
+                        continue
                     if engine.pending_events: continue
                     rolls = engine.get_roll(p)
                     options = engine.get_move_options(p, rolls)
