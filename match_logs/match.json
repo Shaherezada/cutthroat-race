@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-03T16:05:59.285698",
+  "timestamp": "2026-02-05T11:41:32.057363",
   "history": [
     {
       "turn": 1,
@@ -12,14 +12,81 @@
       "turn": 2,
       "player": 1,
       "type": "MOVE",
-      "steps": 6,
-      "to": 6
+      "steps": 4,
+      "to": 4
     },
     {
       "turn": 2,
       "player": 1,
-      "type": "CARD_USE",
-      "card": "рука судьбы"
+      "type": "RULE_TRIGGER",
+      "rule": "прыжок отстающего",
+      "move": 5
+    },
+    {
+      "turn": 3,
+      "player": 1,
+      "type": "Хорошо",
+      "name": "cаботаж",
+      "effect": "pay_coins_move_others_back",
+      "value": 0
+    },
+    {
+      "turn": 3,
+      "player": 1,
+      "type": "SLIDER_EFFECT_OTHERS",
+      "effect": "pay_coins_move_others_back",
+      "coins_spent": 1,
+      "steps_back": 1,
+      "targets": [
+        "Игрок 1"
+      ]
+    },
+    {
+      "turn": 3,
+      "player": 0,
+      "type": "MOVE",
+      "steps": 4,
+      "to": 14
+    },
+    {
+      "turn": 3,
+      "player": 0,
+      "type": "Хорошо",
+      "name": "форсаж",
+      "effect": "pay_coins_move_flexible",
+      "value": 0
+    },
+    {
+      "turn": 3,
+      "player": 0,
+      "type": "SLIDER_EFFECT_SELF",
+      "effect": "pay_coins_move_flexible",
+      "coins_spent": 2,
+      "steps": 2
+    },
+    {
+      "turn": 3,
+      "player": 0,
+      "type": "Хорошо",
+      "name": "ускорение за монеты",
+      "effect": "pay_coins_move_flexible",
+      "value": 2
+    },
+    {
+      "turn": 3,
+      "player": 0,
+      "type": "SLIDER_EFFECT_SELF",
+      "effect": "pay_coins_move_flexible",
+      "coins_spent": 2,
+      "steps": 4
+    },
+    {
+      "turn": 3,
+      "player": 0,
+      "type": "Хорошо",
+      "name": "форсаж",
+      "effect": "pay_coins_move_flexible",
+      "value": 0
     }
   ]
 }

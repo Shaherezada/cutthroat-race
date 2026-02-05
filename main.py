@@ -4,7 +4,7 @@ from game_core.engine import GameEngine
 from ui.view_config import ViewConfig
 from ui.renderer import Renderer
 from game_core.logger import GameLogger
-from ui.components import Dialog
+from ui.components import Dialog, SliderDialog
 
 
 WINDOW_SIZE = 1000
@@ -21,6 +21,7 @@ def main():
     turn_count = 1
 
     active_dialog = None
+    active_slider = None
     pending_shop_cards = []  # Храним карты, предложенные Лавкой
     pending_event_card = None  # Храним текущую карту события
     pending_event_is_good = True  # Какую сторону показывать
@@ -47,10 +48,19 @@ def main():
         p = engine.state.current_player
 
         # 1. Обработка очереди событий (делаем это только если сейчас нет активных окон)
-        if engine.pending_events and not active_dialog and not viewing_card_sprite_id:
+        if engine.pending_events and not active_dialog and not active_slider and not viewing_card_sprite_id:
             game_event = engine.pending_events[0]  # Просто смотрим первое событие
             event_player = game_event.player
-            if game_event.type == "SHOP":
+
+            if game_event.type == "SLIDER_INPUT":
+                data = game_event.data
+                active_slider = SliderDialog(
+                    title=data["title"],
+                    description=data["description"],
+                    max_value=data["max_value"],
+                    multiplier=data["multiplier"]
+                )
+            elif game_event.type == "SHOP":
                 pending_shop_cards = game_event.data["cards"]
                 # pending_selection_rects возвращает draw_card_selector()
             elif game_event.type == "EVENT_CARD":
@@ -95,6 +105,28 @@ def main():
             if event.type == pygame.QUIT:
                 logger.save()
                 running = False
+
+            if active_slider:
+                result = active_slider.handle_event(event, mouse_pos)
+                if result:
+                    action, value = result
+                    current_ev = engine.pending_events[0]
+
+                    if action == 'confirm':
+                        effect_data = {
+                            "effect_id": current_ev.data["effect_id"],
+                            "multiplier": current_ev.data["multiplier"],
+                            "target_self": current_ev.data.get("target_self", True)
+                        }
+                        engine.resolve_slider_input(current_ev.player, value, effect_data)
+                        engine.pending_events.pop(0)
+                    elif action == "cancel":
+                        # Просто закрываем
+                        engine.pending_events.pop(0)
+                        logger.log_event(current_ev.player.uid, "SLIDER_CANCELLED", {})
+
+                    active_slider = None
+                continue
 
             # Просмотр карты Та-Дам
             if viewing_card_sprite_id:
@@ -142,6 +174,7 @@ def main():
                                 active_dialog = None
                                 engine.pending_events.pop(0)
                             elif "противника" in title:  # Схватка
+                                game_event = engine.pending_events[0]
                                 engine.resolve_duel_opponent(p, game_event.data["opponents"][i])
                                 active_dialog = None
                                 engine.pending_events.pop(0)
@@ -240,10 +273,11 @@ def main():
         else:
             renderer.draw_players(engine.state)
             renderer.draw_hover(mouse_pos)
-            if active_dialog: active_dialog.draw(screen)
+            if active_slider: active_slider.draw(screen, mouse_pos)
+            elif active_dialog: active_dialog.draw(screen)
 
         can_act = engine.can_player_do_actions(p) if p.has_moved else False
-        has_pending = bool(engine.pending_events or active_dialog or viewing_card_sprite_id)
+        has_pending = bool(engine.pending_events or active_dialog or active_slider or viewing_card_sprite_id)
         renderer.draw_sidebar(engine.state, turn_count, elapsed_seconds, can_act, has_pending)
         pygame.display.flip()
         clock.tick(60)

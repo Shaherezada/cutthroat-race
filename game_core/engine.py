@@ -589,7 +589,27 @@ class GameEngine:
             raise NotImplementedError("Событие 'благородство': требуется механика двойного хода в UI")
 
         elif effect_id == "pay_coins_move_flexible":
-            raise NotImplementedError("Нужен ввод кол-ва монет (1-5) в UI")
+            # Создаем событие с запросом на ввод количества монет через слайдер
+            # value содержит множитель (сколько клеток за монету)
+            max_coins = min(5, source.coins) if value > 0 else source.coins  # Для форсажа - все монеты, для ускорения - до 5
+            if max_coins == 0:
+                return  # Нет монет - ничего не делаем
+
+            if value == 2: description = "За каждую сброшенную монету передвинься на 2 клетки вперёд."
+            else: description = "Сбрось сколько угодно монет, передвинься на столько же клеток вперёд."
+
+            self.pending_events.append(GameEvent(
+                type="SLIDER_INPUT",
+                player=source,
+                data={
+                    "effect_id": effect_id,
+                    "max_value": max_coins,
+                    "multiplier": value if value != 0 else 1,
+                    "title": "Сбросить монеты",
+                    "description": description,
+                    "target_self": True,
+                }
+            ))
 
         elif effect_id == "place_mines":
             raise NotImplementedError("Нужен выбор клеток для размещения мин в UI")
@@ -604,7 +624,22 @@ class GameEngine:
             raise NotImplementedError("Событие 'подарок Джо': Генерация события SHOP с ценой 0")
 
         elif effect_id == "pay_coins_move_others_back":
-            raise NotImplementedError("Событие 'саботаж': Выбор суммы сброса и расчет отката врагов")
+            max_coins = source.coins
+            if max_coins == 0:
+                return
+
+            self.pending_events.append(GameEvent(
+                type="SLIDER_INPUT",
+                player=source,
+                data={
+                    "effect_id": effect_id,
+                    "max_value": max_coins,
+                    "multiplier": -1,
+                    "title": "Саботаж",
+                    "description": "Сбрось любое количество монет. Остальные игроки передвинутся на столько же клеток назад.",
+                    "target_self": False
+                }
+            ))
 
         elif effect_id == "skip_turn_mutual":
             raise NotImplementedError("Событие 'общая задержка': Выбор цели для совместного пропуска хода")
@@ -785,6 +820,46 @@ class GameEngine:
         self.logger.log_event(source.uid, "EFFECT_DISCARD_CHOICE", {
             "target": target.name, "card": card.name
         })
+
+    def resolve_slider_input(self, player: Player, coins_spent: int, effect_data: dict):
+        """
+        Обрабатывает результат выбора слайдером
+        :param player: Кто делает выбор
+        :param coins_spent: Количество монет которые игрок решил потратить
+        :param effect_data: Словарь с effect_id, multiplier, target_self
+        """
+        if coins_spent == 0:
+            return  # Игрок отказался
+
+        if not player.pay(coins_spent):
+            return
+
+        effect_id = effect_data.get("effect_id")
+        multiplier = effect_data.get("multiplier", 1)
+        target_self = effect_data.get("target_self", True)
+
+        if target_self:
+            steps = coins_spent * abs(multiplier)
+            self.move_player(player, steps)
+
+            self.logger.log_event(player.uid, "SLIDER_EFFECT_SELF", {
+                "effect": effect_id,
+                "coins_spent": coins_spent,
+                "steps": steps
+            })
+        else:
+            # Для эффекта откидывания других игроков назад
+            steps = coins_spent
+            for p in self.state.players:
+                if p.uid != player.uid:
+                    self.move_player(p, abs(steps), is_forward=False)
+
+            self.logger.log_event(player.uid, "SLIDER_EFFECT_OTHERS", {
+                "effect": effect_id,
+                "coins_spent": coins_spent,
+                "steps_back": steps,
+                "targets": [p.name for p in self.state.players if p.uid != player.uid]
+            })
 
     def use_card_from_hand(self, player_idx: int, card_idx: int, target_idx: Optional[int] = None) -> bool:
         player = self.state.players[player_idx]
