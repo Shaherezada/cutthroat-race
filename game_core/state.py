@@ -18,6 +18,7 @@ class Player:
         self.has_extra_turn: bool = False
 
         self.has_moved = False # Совершил ли игрок основной бросок кубика
+        self.turn_checks_done = False
         self.is_finished: bool = False
 
     def can_afford(self, amount: int) -> bool:
@@ -52,6 +53,7 @@ class Player:
         self.used_cards_indices.clear()
         self.has_moved = False
         self.has_extra_turn = False
+        self.turn_checks_done = False
 
 class GameState:
     def __init__(self, player_count=2):

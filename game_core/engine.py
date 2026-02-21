@@ -166,6 +166,7 @@ class GameEngine:
 
     def start_turn_checks(self, player: Player):
         """Для правил, действующих в начале хода (бонусы отстающим и т.д.)"""
+        player.turn_checks_done = True
         # Проверка пропуска хода
         if player.skip_next_turn:
             player.skip_next_turn = False
@@ -626,7 +627,11 @@ class GameEngine:
             ))
 
         elif effect_id == "place_mines":
-            raise NotImplementedError("Нужен выбор клеток для размещения мин в UI")
+            self.pending_events.append(GameEvent(
+                type="MINE_PLACEMENT",
+                player=source,
+                data={"cost_per_mine": value}  # value=1
+            ))
 
         elif effect_id == "tax_shop_cards":
             raise NotImplementedError("Событие 'налог на имущество': Диалог оплаты/сброса для каждой карты в руке")

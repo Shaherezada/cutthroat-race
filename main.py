@@ -32,6 +32,8 @@ def main():
     pending_selection_rects = []
     last_rolls = None
     duel_defender = None
+    mine_placement_mode = False
+    mine_placement_player = None
 
     view_cfg = ViewConfig("ui/coords.json", target_size=WINDOW_SIZE)
     raw_board = pygame.image.load("assets/field_corrected.png").convert()  # convert() ускоряет отрисовку
@@ -96,6 +98,10 @@ def main():
             elif game_event.type == "CHOOSE_CARD_TO_DISCARD":
                 options = [f"{c.name}" for c in game_event.data["cards"]]
                 active_dialog = Dialog(f"{event_player}: Сбрось карту у {game_event.data['target'].name}", options)
+            elif game_event.type == "MINE_PLACEMENT":
+                mine_placement_mode = True
+                mine_placement_player = event_player
+                engine.pending_events.pop(0)  # сразу снимаем — режим управляется флагом
 
         if p.has_moved and not engine.pending_events and not active_dialog and not viewing_card_sprite_id:
             if not engine.can_player_do_actions(p):
@@ -168,6 +174,24 @@ def main():
                                 break
                         continue
 
+            if mine_placement_mode and mine_placement_player:
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    # Кнопка завершения
+                    finish_btn = pygame.Rect(WINDOW_SIZE + 30, 820, 240, 55)
+                    if finish_btn.collidepoint(mouse_pos):
+                        mine_placement_mode = False
+                        mine_placement_player = None
+                        continue
+
+                    # Клик по клетке на доске
+                    if mouse_pos[0] < WINDOW_SIZE and mine_placement_player.coins > 0:
+                        cell_id = view_cfg.get_cell_under_mouse(mouse_pos, radius=35)
+                        if cell_id != -1 and cell_id not in engine.placed_mines:
+                            mine_placement_player.pay(1)
+                            engine.placed_mines[cell_id] = mine_placement_player.uid
+                            logger.log_event(mine_placement_player.uid, "MINE_PLACED", {"cell": cell_id})
+                continue  # не обрабатываем другие клики в этом режиме
+
             if active_dialog:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     for i, btn in enumerate(active_dialog.buttons):
@@ -215,7 +239,7 @@ def main():
                 continue
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                if not engine.pending_events and not p.has_moved:
+                if not engine.pending_events and not p.has_moved and not p.turn_checks_done:
                     turn_skipped = engine.start_turn_checks(p)
                     if turn_skipped:
                         turn_count += 1
@@ -284,6 +308,7 @@ def main():
         screen.fill((30, 30, 30))
         renderer.draw_board()
         renderer.draw_active_rules(engine.state.active_rules)
+        renderer.draw_mines(engine.placed_mines)
         renderer.draw_players(engine.state)
 
         if viewing_card_sprite_id:
@@ -297,8 +322,13 @@ def main():
             elif active_dialog: active_dialog.draw(screen)
 
         can_act = engine.can_player_do_actions(p) if p.has_moved else False
-        has_pending = bool(engine.pending_events or active_dialog or active_slider or viewing_card_sprite_id)
+        has_pending = bool(engine.pending_events or active_dialog or active_slider or viewing_card_sprite_id or mine_placement_mode)
         renderer.draw_sidebar(engine.state, turn_count, elapsed_seconds, can_act, has_pending)
+
+        if mine_placement_mode and mine_placement_player:
+            renderer.draw_mine_placement_button(mine_placement_player.coins, mouse_pos)
+
+
         pygame.display.flip()
         clock.tick(60)
 

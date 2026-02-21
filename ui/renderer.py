@@ -26,6 +26,7 @@ class Renderer:
     def _load_sprites(self):
         self._load_rule_sprites()
         self._load_shop_sprites()
+        self._load_coin_sprites()
 
     def _load_rule_sprites(self):
         self.rule_sprites_small = {}
@@ -49,6 +50,18 @@ class Renderer:
             if os.path.exists(path):
                 raw = pygame.image.load(path).convert_alpha()
                 self.shop_sprites[i] = pygame.transform.smoothscale(raw, size)
+
+    def _load_coin_sprites(self):
+        self.coin_sprites = {}
+        self.coin_sprites_small = {}
+        self.coin_sprites_board = {}
+        for denom in [1, 5]:
+            path = f'assets/coins/{denom}.png'
+            if os.path.exists(path):
+                raw = pygame.image.load(path).convert_alpha()
+                self.coin_sprites[denom] = pygame.transform.smoothscale(raw, (26, 26))
+                self.coin_sprites_small[denom] = pygame.transform.smoothscale(raw, (18, 18))
+                self.coin_sprites_board[denom] = pygame.transform.smoothscale(raw, (52, 52))
 
     def draw_board(self):
         self.screen.blit(self.board_img, (0, 0))
@@ -109,35 +122,36 @@ class Renderer:
 
         # 2. Игроки
         for i, player in enumerate(state.players):
-            y_offset = 120 + (i * 220)
+            y_offset = 120 + (i * 260)
             is_active = (state.current_player_idx == i)
 
-            # Рамка игрока
             color = self.player_colors[i % len(self.player_colors)]
             bg_color = (60, 60, 70) if is_active else (45, 45, 50)
-            player_rect = pygame.Rect(sidebar_rect.x + 10, y_offset, 280, 200)
+            player_rect = pygame.Rect(sidebar_rect.x + 10, y_offset, 280, 240)
             pygame.draw.rect(self.screen, bg_color, player_rect, border_radius=10)
             if is_active:
                 pygame.draw.rect(self.screen, color, player_rect, 2, border_radius=10)
 
             name_txt = self.font.render(f"{player.name}", True, color)
-            coin_txt = self.font.render(f"Монеты: {player.coins} ©", True, (255, 255, 255)) # Баланс
-            self.screen.blit(name_txt, (player_rect.x + 15, player_rect.y + 15))
-            self.screen.blit(coin_txt, (player_rect.x + 15, player_rect.y + 45))
+            self.screen.blit(name_txt, (player_rect.x + 15, player_rect.y + 12))
 
-            # Инвентарь карт (Лавка Джо)
+            # Монеты — спрайтами
+            coin_label = pygame.font.SysFont("Arial", 14).render("Монеты:", True, (180, 180, 180))
+            self.screen.blit(coin_label, (player_rect.x + 15, player_rect.y + 42))
+            coins_h = self.draw_coins_bar(player_rect.x + 15, player_rect.y + 58, player.coins, max_width=255)
+
+            cards_y = player_rect.y + 60 + coins_h + 4
+
             if not player.hand:
-                empty_txt = pygame.font.SysFont("Arial", 16).render("Нет карт Лавки", True, (120, 120, 120))
-                self.screen.blit(empty_txt, (player_rect.x + 15, player_rect.y + 80))
+                empty_txt = pygame.font.SysFont("Arial", 15).render("Нет карт Лавки", True, (120, 120, 120))
+                self.screen.blit(empty_txt, (player_rect.x + 15, cards_y))
             else:
                 for j, card in enumerate(player.hand):
-                    card_btn_rect = pygame.Rect(player_rect.x + 10, player_rect.y + 80 + (j * 35), 260, 30)
+                    card_btn_rect = pygame.Rect(player_rect.x + 10, cards_y + (j * 34), 260, 28)
                     pygame.draw.rect(self.screen, (30, 30, 35), card_btn_rect, border_radius=5)
-                    # Если карта уже использована в этом ходу - затеняем
                     txt_color = (255, 255, 255) if j not in player.used_cards_indices else (100, 100, 100)
-                    card_txt = pygame.font.SysFont("Arial", 16, bold=True).render(card.name.upper(), True,
-                                                                                  txt_color)
-                    self.screen.blit(card_txt, (card_btn_rect.x + 10, card_btn_rect.y + 5))
+                    card_txt = pygame.font.SysFont("Arial", 15, bold=True).render(card.name.upper(), True, txt_color)
+                    self.screen.blit(card_txt, (card_btn_rect.x + 8, card_btn_rect.y + 5))
 
         # 3. Кнопка завершения хода
         p = state.current_player
@@ -151,6 +165,39 @@ class Renderer:
                              (btn_rect.centerx - txt.get_width() // 2, btn_rect.centery - txt.get_height() // 2))
             return btn_rect
         return None
+
+    def draw_coins_bar(self, x: int, y: int, coins: int, max_width: int = 255) -> int:
+        """Рисует монеты спрайтами. Возвращает высоту занятой области в пикселях."""
+        if not self.coin_sprites or coins <= 0:
+            txt = pygame.font.SysFont("Arial", 15).render("0", True, (150, 150, 150))
+            self.screen.blit(txt, (x, y + 5))
+            return 30
+
+        coin_list = []
+        remaining = coins
+        # Если делится на 5 — последнюю пятёрку заменяем на пять единиц
+        if remaining > 0 and remaining % 5 == 0:
+            remaining -= 5
+            fives = remaining // 5
+            coin_list.extend([5] * fives)
+            coin_list.extend([1] * 5)
+        else:
+            fives = remaining // 5
+            coin_list.extend([5] * fives)
+            remaining -= fives * 5
+            coin_list.extend([1] * remaining)
+
+        size, gap = 26, 3
+        per_row = max(1, max_width // (size + gap))
+        rows = (len(coin_list) + per_row - 1) // per_row
+
+        for i, d in enumerate(coin_list):
+            col, row = i % per_row, i // per_row
+            sprite = self.coin_sprites.get(d)
+            if sprite:
+                self.screen.blit(sprite, (x + col * (size + gap), y + row * (size + gap)))
+
+        return rows * (size + gap) + 2
 
     def draw_large_rule_card(self, sprite_id: int, mouse_pos: tuple):
         """Рисует крупную карту в центре экрана с затемнением фона"""
@@ -232,3 +279,27 @@ class Renderer:
 
         card_rects.append(skip_btn)
         return card_rects
+
+    def draw_mines(self, placed_mines: dict):
+        """Рисует мины на доске."""
+        for cell_id in placed_mines:
+            pos = self.view_cfg.get_screen_coords(int(cell_id))
+            sprite = self.coin_sprites_board.get(1)
+            if sprite:
+                self.screen.blit(sprite, (pos[0] - 26, pos[1] - 26))
+
+    def draw_mine_placement_button(self, player_coins: int, mouse_pos: tuple) -> pygame.Rect:
+        btn_rect = pygame.Rect(self.view_cfg.target_size + 15, 815, 270, 85)
+        is_hover = btn_rect.collidepoint(mouse_pos)
+        pygame.draw.rect(self.screen, (140, 90, 0) if is_hover else (100, 65, 0), btn_rect, border_radius=10)
+        pygame.draw.rect(self.screen, (255, 215, 0), btn_rect, 2, border_radius=10)
+
+        label = self.font.render("Завершить расстановку", True, (255, 255, 255))
+        sub_font = pygame.font.SysFont("Arial", 14)
+        sub1 = sub_font.render(f"Монет осталось: {player_coins}", True, (220, 200, 120))
+        sub2 = sub_font.render("(клик на клетку = -1 монета)", True, (220, 200, 120))
+
+        self.screen.blit(label, (btn_rect.centerx - label.get_width() // 2, btn_rect.y + 10))
+        self.screen.blit(sub1, (btn_rect.centerx - sub1.get_width() // 2, btn_rect.y + 40))
+        self.screen.blit(sub2, (btn_rect.centerx - sub2.get_width() // 2, btn_rect.y + 58))
+        return btn_rect

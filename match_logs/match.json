@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-05T11:41:32.057363",
+  "timestamp": "2026-02-21T19:37:46.112342",
   "history": [
     {
       "turn": 1,
@@ -19,74 +19,263 @@
       "turn": 2,
       "player": 1,
       "type": "RULE_TRIGGER",
-      "rule": "прыжок отстающего",
-      "move": 5
-    },
-    {
-      "turn": 3,
-      "player": 1,
-      "type": "Хорошо",
-      "name": "cаботаж",
-      "effect": "pay_coins_move_others_back",
-      "value": 0
-    },
-    {
-      "turn": 3,
-      "player": 1,
-      "type": "SLIDER_EFFECT_OTHERS",
-      "effect": "pay_coins_move_others_back",
-      "coins_spent": 1,
-      "steps_back": 1,
-      "targets": [
-        "Игрок 1"
-      ]
+      "rule": "зарплата отстающего",
+      "roll": 3,
+      "gain": 3
     },
     {
       "turn": 3,
       "player": 0,
       "type": "MOVE",
+      "steps": 6,
+      "to": 28
+    },
+    {
+      "turn": 4,
+      "player": 1,
+      "type": "MOVE",
+      "steps": 6,
+      "to": 23
+    },
+    {
+      "turn": 4,
+      "player": 1,
+      "type": "RULE_TRIGGER",
+      "rule": "зарплата отстающего",
+      "roll": 4,
+      "gain": 4
+    },
+    {
+      "turn": 5,
+      "player": 0,
+      "type": "MOVE",
       "steps": 4,
-      "to": 14
+      "to": 32
     },
     {
-      "turn": 3,
+      "turn": 6,
+      "player": 1,
+      "type": "MOVE",
+      "steps": 5,
+      "to": 17
+    },
+    {
+      "turn": 6,
+      "player": 1,
+      "type": "RULE_TRIGGER",
+      "rule": "зарплата отстающего",
+      "roll": 5,
+      "gain": 5
+    },
+    {
+      "turn": 7,
       "player": 0,
+      "type": "MOVE",
+      "steps": 4,
+      "to": 47
+    },
+    {
+      "turn": 8,
+      "player": 1,
+      "type": "MOVE",
+      "steps": 3,
+      "to": 20
+    },
+    {
+      "turn": 8,
+      "player": 1,
       "type": "Хорошо",
-      "name": "форсаж",
-      "effect": "pay_coins_move_flexible",
-      "value": 0
+      "name": "ловушка",
+      "effect": "place_mines",
+      "value": 1
     },
     {
-      "turn": 3,
-      "player": 0,
-      "type": "SLIDER_EFFECT_SELF",
-      "effect": "pay_coins_move_flexible",
-      "coins_spent": 2,
-      "steps": 2
+      "turn": 8,
+      "player": 1,
+      "type": "RULE_TRIGGER",
+      "rule": "зарплата отстающего",
+      "roll": 4,
+      "gain": 4
     },
     {
-      "turn": 3,
-      "player": 0,
-      "type": "Хорошо",
-      "name": "ускорение за монеты",
-      "effect": "pay_coins_move_flexible",
-      "value": 2
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "48"
     },
     {
-      "turn": 3,
-      "player": 0,
-      "type": "SLIDER_EFFECT_SELF",
-      "effect": "pay_coins_move_flexible",
-      "coins_spent": 2,
-      "steps": 4
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "49"
     },
     {
-      "turn": 3,
-      "player": 0,
-      "type": "Хорошо",
-      "name": "форсаж",
-      "effect": "pay_coins_move_flexible",
-      "value": 0
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "50"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "51"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "52"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "53"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "54"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "55"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "56"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "57"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "58"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "59"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "60"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "61"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "62"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "63"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "64"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "65"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "66"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "67"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "68"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "69"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "70"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "71"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "72"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "73"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "74"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "75"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "76"
+    },
+    {
+      "turn": 9,
+      "player": 1,
+      "type": "MINE_PLACED",
+      "cell": "77"
     }
   ]
 }

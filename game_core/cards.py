@@ -316,6 +316,17 @@ class CardLibrary:
             ),
         ]
 
+        pairs_data = [
+            (
+                EventSide("ловушка", "Можешь положить по 1 своей монете на любые клетки. "
+                                     "Когда любой игрок останавливается на клетке с монетой, "
+                                     "он пропускает следующий ход, а эта монета сбрасывается. "
+                                     "Эффект клетки, где лежит монета, не действует", "place_mines", 1),
+                EventSide("инвентаризация", "Все игроки сбрасывают все свои карты Лавка Джо, кроме одной.",
+                          "all_discard_to_one_shop_card")
+            )
+        ]
+
         deck_cards = []
         for i, (good, bad) in enumerate(pairs_data):
             deck_cards.append(EventCard(f"event_{i}", good, bad))
