@@ -72,6 +72,9 @@ def main():
                     f"{event_player.name}: {title}: {side.name.upper()}",
                   [side.description, "ОК"]
                 )
+            elif game_event.type == "RED_CHOICE":
+                active_dialog = Dialog(f"{event_player.name}: Красная западня",
+                                       ["Потерять 3 монеты", "Назад на 3 клетки"])
             elif game_event.type == "TADAM_SHOW":
                 pending_tadam_rule = game_event.data["rule"]
                 viewing_card_sprite_id = pending_tadam_rule.sprite_id
@@ -97,8 +100,13 @@ def main():
         if p.has_moved and not engine.pending_events and not active_dialog and not viewing_card_sprite_id:
             if not engine.can_player_do_actions(p):
                 engine.end_turn_checks(p)
-                engine.state.next_turn()
-                turn_count += 1
+                if p.has_extra_turn:
+                    p.has_extra_turn = False
+                    p.reset_turn_flags()
+                    logger.log_event(p.uid, "EXTRA_TURN_START", {"reason": "double_roll"})
+                else:
+                    engine.state.next_turn()
+                    turn_count += 1
 
         # 2. Обработка ввода
         for event in pygame.event.get():
@@ -144,19 +152,21 @@ def main():
             # Выбор карт
             if engine.pending_events and not active_dialog:
                 current_ev = engine.pending_events[0]
-                if current_ev.type in ["SHOP", "CHOOSE_CARD_TO_DISCARD"]:
+                if current_ev.type in ["SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD"]:
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                         for i, rect in enumerate(pending_selection_rects):
                             if rect.collidepoint(mouse_pos):
                                 choice_idx = i if i < len(pending_selection_rects) - 1 else 2
                                 if current_ev.type == "SHOP":
                                     engine.resolve_shop_choice(p, pending_shop_cards, choice_idx)
+                                elif current_ev.type == "SHOP_FREE":
+                                    engine.resolve_shop_free_choice(p, pending_shop_cards, choice_idx)
                                 elif current_ev.type == "CHOOSE_CARD_TO_DISCARD":
                                     engine.resolve_discard_enemy_card(p, current_ev.data["target"], choice_idx)
                                 engine.pending_events.pop(0)
                                 pending_selection_rects = []
                                 break
-                    continue
+                        continue
 
             if active_dialog:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -181,6 +191,11 @@ def main():
                             elif "Победа!" in title:  # Награда за победу в Схватке
                                 reward_types = ["money", "push", "steal_card"]
                                 engine.resolve_duel_reward_choice(p, duel_defender, reward_types[i])
+                                active_dialog = None
+                                engine.pending_events.pop(0)
+                            elif "западня" in title:
+                                if i == 0: p.pay(3)
+                                else: engine.move_player(p, 3, is_forward=False)
                                 active_dialog = None
                                 engine.pending_events.pop(0)
                             elif "Смерч" in title:
@@ -222,8 +237,13 @@ def main():
                     btn_rect = pygame.Rect(WINDOW_SIZE + 50, 850, 200, 60)
                     if btn_rect.collidepoint(mouse_pos):
                         engine.end_turn_checks(p)
-                        engine.state.next_turn()
-                        turn_count += 1
+                        if p.has_extra_turn:
+                            p.has_extra_turn = False
+                            p.reset_turn_flags()
+                            logger.log_event(p.uid, "EXTRA_TURN_START", {"reason": "double_roll"})
+                        else:
+                            engine.state.next_turn()
+                            turn_count += 1
                         continue
 
                 # Проверяем клик в зоне сайдбара
@@ -264,14 +284,14 @@ def main():
         screen.fill((30, 30, 30))
         renderer.draw_board()
         renderer.draw_active_rules(engine.state.active_rules)
+        renderer.draw_players(engine.state)
 
         if viewing_card_sprite_id:
             renderer.draw_large_rule_card(viewing_card_sprite_id, mouse_pos)
-        elif engine.pending_events and engine.pending_events[0].type in ["SHOP", "CHOOSE_CARD_TO_DISCARD"]:
+        elif engine.pending_events and engine.pending_events[0].type in ["SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD"]:
             ev = engine.pending_events[0]
             pending_selection_rects = renderer.draw_card_selector(ev.data["cards"], "", mouse_pos)
         else:
-            renderer.draw_players(engine.state)
             renderer.draw_hover(mouse_pos)
             if active_slider: active_slider.draw(screen, mouse_pos)
             elif active_dialog: active_dialog.draw(screen)

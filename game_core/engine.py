@@ -39,11 +39,10 @@ class GameEngine:
         if count == 2 and rolls[0] == rolls[1]:
             for rule in self.state.active_rules:
                 if rule.effect_id == "rule_double_reroll":
-                    # TODO: дать повторный ход (main.py)
+                    player.has_extra_turn = True
                     self.logger.log_event(player.uid, "RULE_TRIGGER", {
-                        "rule": rule.name, "rolls": rolls
+                        "rule": rule.name, "rolls": rolls, "extra_turn": True
                     })
-                    raise NotImplementedError("Правило: 'дубль ход': требуется механика повторного хода")
 
         # Та-Дам "проклятие шестёрки"
         if any(r == 6 for r in rolls):
@@ -259,7 +258,8 @@ class GameEngine:
                 elif eid == "rule_green_move":
                     self.move_player(player, rule.value)
                 elif eid == "rule_green_extra_turn":
-                    raise NotImplementedError("Та-Дам 'зелёный разгон': Реализовать повторный ход текущего игрока")
+                    player.has_extra_turn = True
+                    self.logger.log_event(player.uid, "RULE_GREEN_EXTRA", {})
 
             # Правила, требующие сложной проверки контекста
             if eid == "rule_six_skip":
@@ -417,6 +417,20 @@ class GameEngine:
             for c in cards:
                 self.state.deck_shop.discard(c)
             self.logger.log_event(player.uid, "SHOP_SKIP", {})
+
+    def resolve_shop_free_choice(self, player: Player, cards: List[ShopCard], choice_idx: int):
+        """Бесплатный выбор карты из Лавки Джо"""
+        if choice_idx < 2:
+            card = cards[choice_idx]
+            player.add_card(card)
+            self.logger.log_event(player.uid, "SHOP_FREE", {
+                "card": card.name,
+            })
+            self.state.deck_shop.discard(cards[1 - choice_idx])
+        else:
+            for c in cards:
+                self.state.deck_shop.discard(c)
+            self.logger.log_event(player.uid, "SHOP_FREE_SKIP", {})
 
     def resolve_duel_opponent(self, attacker: Player, defender: Player):
         """
@@ -621,7 +635,12 @@ class GameEngine:
             raise NotImplementedError("Событие 'инвентаризация': Групповое событие сброса лишних карт")
 
         elif effect_id == "draw_2_keep_1_free":
-            raise NotImplementedError("Событие 'подарок Джо': Генерация события SHOP с ценой 0")
+            cards = self.state.deck_shop.draw(2)
+            self.pending_events.append(GameEvent(
+                type="SHOP_FREE",
+                player=source,
+                data={"cards": cards}
+            ))
 
         elif effect_id == "pay_coins_move_others_back":
             max_coins = source.coins
@@ -690,7 +709,11 @@ class GameEngine:
 
         # --- ТА-ДАМ ГЛОБАЛЬНЫЕ ПРАВИЛА ---
         elif effect_id == "rule_red_choice":
-            raise NotImplementedError("Та-Дам: Выбор -3 монеты или -3 шага в UI")
+            self.pending_events.append(GameEvent(
+                type="RED_CHOICE",
+                player=source,
+                data={}
+            ))
 
         elif effect_id == "rule_last_player_income":
             if self._is_last(source): source.add_coins(value)

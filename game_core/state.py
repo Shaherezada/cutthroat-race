@@ -15,6 +15,7 @@ class Player:
         self.used_cards_indices: Set[int] = set()
 
         self.skip_next_turn: bool = False
+        self.has_extra_turn: bool = False
 
         self.has_moved = False # Совершил ли игрок основной бросок кубика
         self.is_finished: bool = False
@@ -50,6 +51,7 @@ class Player:
         """Вызывается в начале хода"""
         self.used_cards_indices.clear()
         self.has_moved = False
+        self.has_extra_turn = False
 
 class GameState:
     def __init__(self, player_count=2):
