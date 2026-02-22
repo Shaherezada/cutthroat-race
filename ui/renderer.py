@@ -105,6 +105,8 @@ class Renderer:
     def draw_sidebar(self, state: GameState, turn_count: int, elapsed_seconds: int,
                      can_do_actions: bool = False, has_pending: bool = False):
         """Отрисовка правой информационной интерактивной панели"""
+        active_card_rects = []
+
         sidebar_rect = pygame.Rect(self.view_cfg.target_size, 0, 300, self.view_cfg.target_size)
         pygame.draw.rect(self.screen, (40, 40, 45), sidebar_rect)
         pygame.draw.line(self.screen, (100, 100, 100), (sidebar_rect.x, 0),
@@ -152,6 +154,8 @@ class Renderer:
                     txt_color = (255, 255, 255) if j not in player.used_cards_indices else (100, 100, 100)
                     card_txt = pygame.font.SysFont("Arial", 15, bold=True).render(card.name.upper(), True, txt_color)
                     self.screen.blit(card_txt, (card_btn_rect.x + 8, card_btn_rect.y + 5))
+                    if is_active:
+                        active_card_rects.append(card_btn_rect)
 
         # 3. Кнопка завершения хода
         p = state.current_player
@@ -163,8 +167,8 @@ class Renderer:
             txt = self.font.render("Завершить ход", True, (255, 255, 255))
             self.screen.blit(txt,
                              (btn_rect.centerx - txt.get_width() // 2, btn_rect.centery - txt.get_height() // 2))
-            return btn_rect
-        return None
+            return btn_rect, active_card_rects
+        return None, active_card_rects
 
     def draw_coins_bar(self, x: int, y: int, coins: int, max_width: int = 255) -> int:
         """Рисует монеты спрайтами. Возвращает высоту занятой области в пикселях."""
@@ -233,7 +237,7 @@ class Renderer:
             rect = sprite.get_rect(center=pos)
             self.screen.blit(sprite, rect)
 
-    def draw_card_selector(self, cards: list, title: str, mouse_pos: tuple):
+    def draw_card_selector(self, cards: list, title: str, mouse_pos: tuple, show_skip: bool = True):
         """
         Универсальный метод отрисовки выбора из нескольких карт.
         Возвращает индекс выбранной карты или -1.
@@ -269,15 +273,16 @@ class Renderer:
 
             self.screen.blit(sprite, rect)
 
-        # Кнопка "Пропустить"
-        skip_btn = pygame.Rect(self.view_cfg.target_size // 2 - 100, 700, 200, 50)
-        is_skip_hover = skip_btn.collidepoint(mouse_pos)
-        pygame.draw.rect(self.screen, (150, 50, 50) if is_skip_hover else (100, 30, 30), skip_btn, border_radius=10)
-        txt = self.font.render("Пропустить", True, (255, 255, 255))
-        self.screen.blit(txt, (skip_btn.centerx - txt.get_width() // 2,
-                                    skip_btn.centery - txt.get_height() // 2 - 1))
+        if show_skip:
+            # Кнопка "Пропустить"
+            skip_btn = pygame.Rect(self.view_cfg.target_size // 2 - 100, 700, 200, 50)
+            is_skip_hover = skip_btn.collidepoint(mouse_pos)
+            pygame.draw.rect(self.screen, (150, 50, 50) if is_skip_hover else (100, 30, 30), skip_btn, border_radius=10)
+            txt = self.font.render("Пропустить", True, (255, 255, 255))
+            self.screen.blit(txt, (skip_btn.centerx - txt.get_width() // 2,
+                                        skip_btn.centery - txt.get_height() // 2 - 1))
+            card_rects.append(skip_btn)
 
-        card_rects.append(skip_btn)
         return card_rects
 
     def draw_mines(self, placed_mines: dict):

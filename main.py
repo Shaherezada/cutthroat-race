@@ -30,6 +30,7 @@ def main():
     pending_tornado_target = None
     pending_move_options = []
     pending_selection_rects = []
+    sidebar_card_rects = []
     pending_card_use_idx = None
     pending_finish_result = None  # (roll, bonus, total, success) — результат броска на финише
     last_rolls = None
@@ -65,7 +66,8 @@ def main():
                 )
             elif game_event.type == "SHOP":
                 pending_shop_cards = game_event.data["cards"]
-                # pending_selection_rects возвращает draw_card_selector()
+            elif game_event.type == "SHOP_FREE":
+                pending_shop_cards = game_event.data["cards"]
             elif game_event.type == "EVENT_CARD":
                 pending_event_card = game_event.data["card"]
                 pending_event_is_good = game_event.data["is_good"]
@@ -126,6 +128,14 @@ def main():
                         f"{event_player.name}: Налог — «{card.name.upper()}»",
                         [f"Заплатить {cost} монет (есть: {event_player.coins})", "Сбросить карту"]
                     )
+
+        if not p.turn_checks_done and not p.has_moved \
+                and not engine.pending_events and not active_dialog \
+                and not active_slider and not viewing_card_sprite_id:
+            turn_skipped = engine.start_turn_checks(p)
+            if turn_skipped:
+                p = engine.state.current_player # синхронизируем локальную ссылку
+                continue # пропускаем остаток итерации и сразу начинаем новую
 
         # Логика завершения хода
         if p.has_moved and not engine.pending_events and not active_dialog and not viewing_card_sprite_id:
@@ -235,7 +245,6 @@ def main():
                             if "Выбери ход" in title:
                                 steps = pending_move_options[i]
                                 engine.move_player(p, steps)
-                                logger.log_event(p.uid, "MOVE", {"steps": steps, "to": p.position})
                                 active_dialog = None
                             elif pending_finish_result and btn.text == "ОК":
                                 pending_finish_result = None
@@ -331,12 +340,7 @@ def main():
                 continue
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                if not engine.pending_events and not p.has_moved and not p.turn_checks_done:
-                    turn_skipped = engine.start_turn_checks(p)
-                    if turn_skipped: continue
-                    if engine.pending_events:
-                        continue
-
+                if not engine.pending_events and not p.has_moved and p.turn_checks_done:
                     # Игрок застрял на финише — бросает только на сейф
                     if p.is_finished:
                         engine.pending_events.append(GameEvent(
@@ -352,7 +356,6 @@ def main():
                         else:
                             steps = options[0]
                             engine.move_player(p, steps)
-                            logger.log_event(p.uid, "MOVE", {"steps": steps, "to": p.position})
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 # Кнопка завершения хода
@@ -370,28 +373,22 @@ def main():
                                 engine.state.next_turn(logger)
                         continue
 
-                # Проверяем клик в зоне сайдбара
                 if mouse_pos[0] > WINDOW_SIZE:
-                    # Считаем, на какую карту нажал текущий игрок
                     p_idx = engine.state.current_player_idx
                     p = engine.state.current_player
-                    base_y = 120 + (p_idx * 220) + 80
-
-                    for j in range(len(p.hand)):
-                        card_rect = pygame.Rect(WINDOW_SIZE + 20, base_y + (j * 35), 260, 30)
+                    for j, card_rect in enumerate(sidebar_card_rects):
                         if card_rect.collidepoint(mouse_pos):
                             card = p.hand[j]
-                            # Если карта требует цель (гарпун, вуду и т.д.)
-                            # Сейчас упростим: при клике открываем диалог выбора цели
+                            if card.is_passive:
+                                break
                             opponents = [opp for opp in engine.state.players if opp.uid != p.uid]
                             if len(opponents) == 1:
-                                # Если враг один - применяем сразу
                                 if engine.use_card_from_hand(p_idx, j, target_idx=opponents[0].uid):
                                     logger.log_event(p.uid, "CARD_USE", {"card": card.name})
-                            else:
-                                pending_card_use_idx = j
-                                options = [opp.name for opp in opponents]
-                                active_dialog = Dialog(f"Выбери цель для «{card.name}»", options)
+                                else:
+                                    pending_card_use_idx = j
+                                    active_dialog = Dialog(f"Выбери цель для «{card.name}»",
+                                                           [opp.name for opp in opponents])
 
                 # Клик по карте Та-Дам
                 if not active_dialog and not viewing_card_sprite_id:
@@ -424,7 +421,8 @@ def main():
                 "INVENTORY_KEEP": f"Инвентаризация: {ev.player.name} — выбери карту, которую оставишь",
             }
             pending_selection_rects = renderer.draw_card_selector(
-                ev.data["cards"], titles.get(ev.type, ""), mouse_pos
+                ev.data["cards"], titles.get(ev.type, ""), mouse_pos,
+                show_skip=(ev.type != "SHOP_FREE")
             )
         else:
             renderer.draw_hover(mouse_pos)
@@ -433,7 +431,9 @@ def main():
 
         can_act = engine.can_player_do_actions(p) if p.has_moved else False
         has_pending = bool(engine.pending_events or active_dialog or active_slider or viewing_card_sprite_id or mine_placement_mode)
-        renderer.draw_sidebar(engine.state, turn_count, elapsed_seconds, can_act, has_pending)
+        _end_btn, sidebar_card_rects = renderer.draw_sidebar(
+            engine.state, turn_count, elapsed_seconds, can_act, has_pending
+        )
 
         if mine_placement_mode and mine_placement_player:
             renderer.draw_mine_placement_button(mine_placement_player.coins, mouse_pos)

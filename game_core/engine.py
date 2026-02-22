@@ -88,9 +88,13 @@ class GameEngine:
                 if card.effect_id in ["attack_hook", "move_harpoon"]:
                     if any(0 < (o.position - player.position) <= 10 for o in opponents):
                         return True
-                elif card.effect_id in ["attack_grenade", "attack_voodoo", "attack_hand_fate"]:
+                elif card.effect_id in ["attack_grenade", "attack_hand_fate"]:
+                    if any(o.position > 0 for o in opponents):
+                        return True
+                elif card.effect_id in ["attack_voodoo", "force_enemy_draw_bad"]:
                     if opponents: return True
-                else: return True
+                else:
+                    return True
         return False
 
     def move_player(self, player: Player, steps: int, is_forward: bool = True):
@@ -124,6 +128,9 @@ class GameEngine:
         # Эффекты срабатывают только при движении ВПЕРЁД в свой ход
         if is_forward:
             player.has_moved = True
+            self.logger.log_event(player.uid, "MOVE", {
+                "steps": actual_steps, "to": target_pos
+            })
             cell = self.board.get_cell(player.position)
             # Проверка портала (чтобы не зациклиться, просто прыгаем и НЕ вызываем лендинг снова)
             if cell.type == CellType.PORTAL and cell.portal_target is not None:
@@ -175,7 +182,7 @@ class GameEngine:
             player.skip_next_turn = False
             self.logger.log_event(player.uid, "TURN_SKIPPED", {})
             # Завершаем ход немедленно
-            self.state.next_turn()
+            self.state.next_turn(self.logger)
             return True
         if player.pending_extra_turn:
             player.pending_extra_turn = False
@@ -224,10 +231,10 @@ class GameEngine:
                     })
 
                 elif eid == "rule_last_move_5":
-                    self.move_player(player, rule.value)
                     self.logger.log_event(player.uid, "RULE_TRIGGER", {
                         "rule": rule.name, "move": rule.value
                     })
+                    self.move_player(player, rule.value)
 
     def _check_global_rules(self, player: Player, cell):
         """Проверка правил Та-Дам после броска на передвижение."""
@@ -683,8 +690,10 @@ class GameEngine:
 
         elif effect_id == "pay_coins_move_others_back":
             max_coins = source.coins
-            if max_coins == 0:
-                return
+            if max_coins == 0: return
+            max_useful = min(p.position for p in self.state.players if p.uid != source.uid)
+            if max_useful == 0: return
+            max_coins = min(max_coins, max_useful)
 
             self.pending_events.append(GameEvent(
                 type="SLIDER_INPUT",
@@ -727,11 +736,11 @@ class GameEngine:
         elif effect_id == "roll_gamble_money_move":
             roll = random.randint(1, 6)
             if roll <= 3:
-                source.add_coins(10)
                 self.logger.log_event(source.uid, "GAMBLE_RESULT", {"roll": roll, "gain": 10})
+                source.add_coins(10)
             else:
-                self.move_player(source, 5)
                 self.logger.log_event(source.uid, "GAMBLE_RESULT", {"roll": roll, "move": 5})
+                self.move_player(source, 5)
 
         # target required
         elif effect_id in ["steal_coins_target", "force_enemy_draw_bad", "discard_enemy_shop_card", "roll_push_enemy",
@@ -955,34 +964,38 @@ class GameEngine:
         card = player.hand[card_idx]
         target = self.state.players[target_idx] if target_idx is not None else None
 
-        # Пассивные карты нельзя активировать кнопкой
         if card.is_passive: return False
-
         if card_idx in player.used_cards_indices: return False
+
+        # Валидация до оплаты
+        eid = card.effect_id
+        if eid in ["attack_hook", "move_harpoon"]:
+            if not (target and 0 < (target.position - player.position) <= 10):
+                return False
+        elif eid in ["attack_hand_fate", "attack_grenade"]:
+            if not (target and target.position > 0):
+                return False
+
         if not player.pay(card.use_cost): return False
 
-        eid = card.effect_id
         if eid == "attack_grenade" and target:
             self.move_player(target, card.value, is_forward=False)
         elif eid == "attack_voodoo" and target:
-            card = self.state.deck_events.draw(1)[0]
+            bad_card = self.state.deck_events.draw(1)[0]
             self.pending_events.append(GameEvent(
                 type="EVENT_CARD",
                 player=target,
-                data={"card": card, "is_good": False}
+                data={"card": bad_card, "is_good": False}
             ))
         elif eid == "move_rocket":
             self.move_player(player, card.value)
         elif eid == "attack_hand_fate" and target:
-            # На 2 назад (на 1 если мало игроков)
             steps = 1 if len(self.state.players) <= 3 else 2
             self.move_player(target, steps, is_forward=False)
         elif eid == "attack_hook" and target:
-            # Притянуть к себе
             if 0 < (target.position - player.position) <= 10:
                 target.position = player.position
         elif eid == "move_harpoon" and target:
-            # Прыгнуть к нему
             if 0 < (target.position - player.position) <= 10:
                 player.position = target.position
 
