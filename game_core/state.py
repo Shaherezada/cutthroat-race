@@ -2,6 +2,7 @@ from typing import List, Deque, Set
 from collections import deque
 from game_core.config import START_MONEY, MAX_HAND_SIZE, TA_DAM_QUEUE_SIZE
 from game_core.cards import Card, CardLibrary, RuleCard, ShopCard
+from game_core.logger import GameLogger
 
 
 class Player:
@@ -16,9 +17,11 @@ class Player:
 
         self.skip_next_turn: bool = False
         self.has_extra_turn: bool = False
+        self.pending_extra_turn: bool = False # флаг, который переживёт reset_turn_flags() при смене хода
 
         self.has_moved = False # Совершил ли игрок основной бросок кубика
         self.turn_checks_done = False
+        self.end_checks_done = False
         self.is_finished: bool = False
 
     def can_afford(self, amount: int) -> bool:
@@ -54,6 +57,7 @@ class Player:
         self.has_moved = False
         self.has_extra_turn = False
         self.turn_checks_done = False
+        self.end_checks_done = False
 
 class GameState:
     def __init__(self, player_count=2):
@@ -72,8 +76,9 @@ class GameState:
     def current_player(self) -> Player:
         return self.players[self.current_player_idx]
 
-    def next_turn(self):
+    def next_turn(self, logger: GameLogger):
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
+        logger.inc_turn()
         self.current_player.reset_turn_flags()
 
     def add_rule(self, card: RuleCard):

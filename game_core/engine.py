@@ -98,6 +98,9 @@ class GameEngine:
         Передвигает игрока и запускает цепочку проверок приземления.
         События складываются в self.pending_events для обработки UI
         """
+        if player.is_finished:
+            return
+
         actual_steps = steps if is_forward else -steps
         start_pos = player.position
         target_pos = self.board.resolve_move(start_pos, actual_steps)
@@ -174,6 +177,9 @@ class GameEngine:
             # Завершаем ход немедленно
             self.state.next_turn()
             return True
+        if player.pending_extra_turn:
+            player.pending_extra_turn = False
+            player.has_extra_turn = True
 
         is_last = self._is_last(player)
 
@@ -244,7 +250,11 @@ class GameEngine:
                         if p.uid != player.uid:
                             if player.pay(amount): p.add_coins(amount)
                 elif eid == "rule_red_choice":
-                    raise NotImplementedError("Та-Дам 'Красная западня': Нужен выбор -3 монеты или -3 шага в UI")
+                    self.pending_events.append(GameEvent(
+                        type="RED_CHOICE",
+                        player=player,
+                        data={}
+                    ))
 
             if cell.type == CellType.GREEN:
                 if eid == "rule_green_good":
@@ -272,12 +282,17 @@ class GameEngine:
             if rule.effect_id == "rule_collision_duel":
                 for other in self.state.players:
                     if other.uid != player.uid and other.position == player.position:
-                        opponents = [other]
-                        self.pending_events.append(GameEvent(
-                            type="DUEL_CHOOSE_OPPONENT",
-                            player=player,
-                            data={"opponents": opponents}
-                        ))
+                        opponents = [o for o in self.state.players
+                                     if o.uid != player.uid and o.position == player.position]
+                        if len(opponents) == 1:
+                            self.logger.log_event(player.uid, "DUEL_AUTO", {"opponent": opponents[0].name})
+                            self.resolve_duel_opponent(player, opponents[0])
+                        else:
+                            self.pending_events.append(GameEvent(
+                                type="DUEL_CHOOSE_OPPONENT",
+                                player=player,
+                                data={"opponents": opponents}
+                            ))
                         break
 
     def _trigger_cell_effect(self, player: Player, cell):
@@ -310,6 +325,7 @@ class GameEngine:
 
         elif ctype == CellType.TA_DAM:
             new_rule = self.state.deck_tadam.draw(1)[0]
+            self.logger.log_event(player.uid, "TADAM_DRAWN", {"rule": new_rule.name})
             self.pending_events.append(GameEvent(
                 type="TADAM_SHOW",
                 player=player,
@@ -338,12 +354,16 @@ class GameEngine:
                     ))
 
         elif ctype == CellType.DUEL:
-            other_players = [p for p in self.state.players if p.uid != player.uid] # Выбор противника для схватки
-            self.pending_events.append(GameEvent(
-                type="DUEL_CHOOSE_OPPONENT",
-                player=player,
-                data={"opponents": other_players}
-            ))
+            other_players = [p for p in self.state.players if p.uid != player.uid]
+            if len(other_players) == 1:
+                self.logger.log_event(player.uid, "DUEL_AUTO", {"opponent": other_players[0].name})
+                self.resolve_duel_opponent(player, other_players[0])
+            else:
+                self.pending_events.append(GameEvent(
+                    type="DUEL_CHOOSE_OPPONENT",
+                    player=player,
+                    data={"opponents": other_players}
+                ))
 
         elif ctype == CellType.BICYCLE:
             self.move_player(player, 10)
@@ -393,6 +413,11 @@ class GameEngine:
 
         elif ctype == CellType.FINISH_SAFE:
             player.is_finished = True
+            self.pending_events.append(GameEvent(
+                type="FINISH_ROLL",
+                player=player,
+                data={}
+            ))
 
         elif ctype == CellType.RED or ctype == CellType.GREEN:
             pass  # Зелёные и красные клетки обрабатываются через правила Та-Дам
@@ -600,9 +625,6 @@ class GameEngine:
                 ))
 
         # --- ЭФФЕКТЫ С ВЫБОРОМ (UI REQUIRED) ---
-        elif effect_id == "give_double_turn_enemy":
-            raise NotImplementedError("Событие 'благородство': требуется механика двойного хода в UI")
-
         elif effect_id == "pay_coins_move_flexible":
             # Создаем событие с запросом на ввод количества монет через слайдер
             # value содержит множитель (сколько клеток за монету)
@@ -634,10 +656,22 @@ class GameEngine:
             ))
 
         elif effect_id == "tax_shop_cards":
-            raise NotImplementedError("Событие 'налог на имущество': Диалог оплаты/сброса для каждой карты в руке")
+            if not source.hand:
+                return
+            self.pending_events.append(GameEvent(
+                type="TAX_SHOP_CARD",
+                player=source,
+                data={"card_idx": 0, "cost": value}  # value=3
+            ))
 
         elif effect_id == "all_discard_to_one_shop_card":
-            raise NotImplementedError("Событие 'инвентаризация': Групповое событие сброса лишних карт")
+            for pl in self.state.players:
+                if len(pl.hand) > 1:
+                    self.pending_events.append(GameEvent(
+                        type="INVENTORY_KEEP",
+                        player=pl,
+                        data={"cards": pl.hand}
+                    ))
 
         elif effect_id == "draw_2_keep_1_free":
             cards = self.state.deck_shop.draw(2)
@@ -665,17 +699,23 @@ class GameEngine:
                 }
             ))
 
-        elif effect_id == "skip_turn_mutual":
-            raise NotImplementedError("Событие 'общая задержка': Выбор цели для совместного пропуска хода")
-
         elif effect_id == "discard_shop_or_red":
-            if source.hand:
-                raise NotImplementedError("Нужен выбор карты Лавки Джо для сброса в UI")
-            else:
+            if not source.hand:
                 self.apply_effect("move_back_to_red_or_3", source)
+            elif len(source.hand) == 1:
+                card = source.remove_card(0)
+                self.state.deck_shop.discard(card)
+            else:
+                self.pending_events.append(GameEvent(
+                    type="CHOOSE_CARD_TO_DISCARD",
+                    player=source,
+                    data={"target": source, "cards": source.hand}
+                ))
 
         elif effect_id == "extra_turn_pay_coins":
-            raise NotImplementedError("Выбор сбрасывать две монеты или нет")
+            if source.pay(value):  # value = 2
+                source.has_extra_turn = True
+                self.logger.log_event(source.uid, "EXTRA_TURN_PAID", {"cost": value})
 
         # --- РАНДОМ И КУБИКИ ---
         elif effect_id == "roll_lose_coins_or_move_back":
@@ -683,15 +723,20 @@ class GameEngine:
             if roll <= 3: source.pay(5)
             else: self.move_player(source, 10, is_forward=False)
 
+
         elif effect_id == "roll_gamble_money_move":
             roll = random.randint(1, 6)
-            if roll <= 3: source.add_coins(10)
-            else: self.move_player(source, 5)
+            if roll <= 3:
+                source.add_coins(10)
+                self.logger.log_event(source.uid, "GAMBLE_RESULT", {"roll": roll, "gain": 10})
+            else:
+                self.move_player(source, 5)
+                self.logger.log_event(source.uid, "GAMBLE_RESULT", {"roll": roll, "move": 5})
 
         # target required
         elif effect_id in ["steal_coins_target", "force_enemy_draw_bad", "discard_enemy_shop_card", "roll_push_enemy",
                            "give_5_to_target", "give_10_to_target", "force_enemy_lose_coins", "give_double_turn_enemy",
-                           "steal_shop_card_leader"]:
+                           "steal_shop_card_leader", "skip_turn_mutual"]:
             if effect_id == "steal_shop_card_leader":
                 opponents = [p for p in self.state.players if p.uid != source.uid and p.position > source.position]
                 if not opponents:
@@ -758,7 +803,7 @@ class GameEngine:
                 card = target.remove_card(0)
                 self.state.deck_shop.discard(card)
                 self.logger.log_event(source.uid, "EFFECT_DISCARD", {
-                    "target": target, "card": card.name
+                    "target": target.name, "card": card.name
                 })
             else:
                 self.pending_events.append(GameEvent(
@@ -818,7 +863,8 @@ class GameEngine:
                 ))
 
         elif effect_id == "give_double_turn_enemy":
-            raise NotImplementedError("Событие 'благородство': требуется механика двойного хода в UI")
+            target.pending_extra_turn = True
+            self.logger.log_event(source.uid, "EFFECT_DOUBLE_TURN", {"target": target.name})
 
         elif effect_id == "steal_shop_card_leader":
             if not target.hand:
@@ -838,6 +884,12 @@ class GameEngine:
                     player=source,
                     data={"target": target, "cards": target.hand}
                 ))
+
+        elif effect_id == "skip_turn_mutual":
+            source.skip_next_turn = True
+            if len(self.state.players) > 2:
+                target.skip_next_turn = True
+            self.logger.log_event(source.uid, "SKIP_TURN_MUTUAL", {"target": target.name})
 
     def resolve_target_choice(self, source: Player, target_uid: int, effect_id: str, value: int):
         target = next(p for p in self.state.players if p.uid == target_uid)
@@ -889,6 +941,15 @@ class GameEngine:
                 "targets": [p.name for p in self.state.players if p.uid != player.uid]
             })
 
+    def resolve_inventory_keep(self, player: Player, keep_idx: int):
+        kept = player.hand[keep_idx]
+        was_used = keep_idx in player.used_cards_indices
+        for i, card in enumerate(player.hand):
+            if i != keep_idx:
+                self.state.deck_shop.discard(card)
+        player.used_cards_indices = {0} if was_used else set()
+        self.logger.log_event(player.uid, "INVENTORY_KEEP", {"kept": kept.name})
+
     def use_card_from_hand(self, player_idx: int, card_idx: int, target_idx: Optional[int] = None) -> bool:
         player = self.state.players[player_idx]
         card = player.hand[card_idx]
@@ -928,14 +989,31 @@ class GameEngine:
         player.mark_card_used(card_idx)
         return True
 
-    def attempt_finish(self, player: Player):
-        """Попытка открыть сейф в конце игры."""
-        if not player.is_finished: return
+    def attempt_finish(self, player: Player, coin_bonus: int = 0) -> tuple:
+        """
+        Попытка открыть сейф.
+        coin_bonus: 0 — бесплатно, 5 — +1 к броску, 10 — +2 к броску.
+        Возвращает (roll, bonus, total, success).
+        """
+        bonus = 0
+        if coin_bonus == 5 and player.pay(5):
+            bonus = 1
+        elif coin_bonus == 10 and player.pay(10):
+            bonus = 2
+
         roll = random.randint(1, 6)
-        # Тут можно добавить механику доплаты монет за +1 к кубику
-        if roll >= WINNING_ROLL:
+        total = roll + bonus
+        success = total >= WINNING_ROLL
+
+        self.logger.log_event(player.uid, "FINISH_ROLL", {
+            "roll": roll, "bonus": bonus, "total": total, "success": success
+        })
+
+        if success:
             self.is_game_over = True
             self.winner = player
+
+        return roll, bonus, total, success
 
     def _get_last_players(self) -> List[Player]:
         """Возвращает список игроков, находящихся дальше всех от финиша."""

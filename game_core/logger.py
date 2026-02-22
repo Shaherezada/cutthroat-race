@@ -8,17 +8,22 @@ class GameLogger:
             "timestamp": datetime.now().isoformat(),
             "history": []
         }
-        self.current_turn = 1
+        self._current_turn = 1
         # Создаем папку, если её нет
         if not os.path.exists("match_logs"):
             os.makedirs("match_logs")
 
-    def set_turn(self, turn: int):
-        self.current_turn = turn
+    @property
+    def current_turn(self):
+        return self._current_turn
+
+    def inc_turn(self):
+        """Вызывается только в state.py при смене хода"""
+        self._current_turn += 1
 
     def log_event(self, player_id: int, event_type: str, details: dict):
         entry = {
-            "turn": self.current_turn,
+            "turn": self._current_turn,
             "player": player_id,
             "type": event_type,
             **details

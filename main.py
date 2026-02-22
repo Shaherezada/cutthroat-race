@@ -1,6 +1,6 @@
 import pygame
 import sys
-from game_core.engine import GameEngine
+from game_core.engine import GameEngine, GameEvent
 from ui.view_config import ViewConfig
 from ui.renderer import Renderer
 from game_core.logger import GameLogger
@@ -30,6 +30,8 @@ def main():
     pending_tornado_target = None
     pending_move_options = []
     pending_selection_rects = []
+    pending_card_use_idx = None
+    pending_finish_result = None  # (roll, bonus, total, success) — результат броска на финише
     last_rolls = None
     duel_defender = None
     mine_placement_mode = False
@@ -44,7 +46,6 @@ def main():
 
     running = True
     while running:
-        logger.set_turn(turn_count)
         mouse_pos = pygame.mouse.get_pos()
         elapsed_seconds = (pygame.time.get_ticks() - start_ticks) // 1000
         p = engine.state.current_player
@@ -74,6 +75,13 @@ def main():
                     f"{event_player.name}: {title}: {side.name.upper()}",
                   [side.description, "ОК"]
                 )
+            elif game_event.type == "FINISH_ROLL":
+                opts = ["Бросить (без бонуса)"]
+                if event_player.coins >= 5:
+                    opts.append(f"Сбросить 5 монет (+1 к броску)")
+                if event_player.coins >= 10:
+                    opts.append(f"Сбросить 10 монет (+2 к броску)")
+                active_dialog = Dialog(f"{event_player.name}: Финиш-сейф! Нужно 6+", opts)
             elif game_event.type == "RED_CHOICE":
                 active_dialog = Dialog(f"{event_player.name}: Красная западня",
                                        ["Потерять 3 монеты", "Назад на 3 клетки"])
@@ -85,9 +93,12 @@ def main():
                 active_dialog = Dialog(f"{event_player.name}: Выбери противника для схватки", options)
             elif game_event.type == "DUEL_CHOOSE_REWARD":
                 duel_defender = game_event.data["loser"]
+                options = ["Забрать 10 монет", "Откинуть на 10 клеток"]
+                if duel_defender.hand:
+                    options.append("Забрать карту Лавки")
                 active_dialog = Dialog(
                     f"{event_player.name}: Победа! ({game_event.data['atk_roll']} vs {game_event.data['def_roll']})",
-                 ["Забрать 10 монет", "Откинуть на 10 клеток", "Забрать карту Лавки"]
+                    options
                 )
             elif game_event.type == "TORNADO_DECISION":
                 pending_tornado_target = game_event.data["target_pos"]
@@ -102,17 +113,34 @@ def main():
                 mine_placement_mode = True
                 mine_placement_player = event_player
                 engine.pending_events.pop(0)  # сразу снимаем — режим управляется флагом
+            elif game_event.type == "INVENTORY_KEEP":
+                pending_shop_cards = game_event.data["cards"]
+            elif game_event.type == "TAX_SHOP_CARD":
+                card_idx = game_event.data["card_idx"]
+                cost = game_event.data["cost"]
+                if card_idx >= len(event_player.hand):
+                    engine.pending_events.pop(0)  # Все карты обработаны
+                else:
+                    card = event_player.hand[card_idx]
+                    active_dialog = Dialog(
+                        f"{event_player.name}: Налог — «{card.name.upper()}»",
+                        [f"Заплатить {cost} монет (есть: {event_player.coins})", "Сбросить карту"]
+                    )
 
+        # Логика завершения хода
         if p.has_moved and not engine.pending_events and not active_dialog and not viewing_card_sprite_id:
-            if not engine.can_player_do_actions(p):
-                engine.end_turn_checks(p)
+            if not p.end_checks_done:
+                if not engine.can_player_do_actions(p):
+                    engine.end_turn_checks(p)
+                    p.end_checks_done = True
+                    if engine.pending_events: continue
+            if p.end_checks_done and not engine.pending_events:
                 if p.has_extra_turn:
                     p.has_extra_turn = False
                     p.reset_turn_flags()
                     logger.log_event(p.uid, "EXTRA_TURN_START", {"reason": "double_roll"})
                 else:
-                    engine.state.next_turn()
-                    turn_count += 1
+                    engine.state.next_turn(logger)
 
         # 2. Обработка ввода
         for event in pygame.event.get():
@@ -158,7 +186,7 @@ def main():
             # Выбор карт
             if engine.pending_events and not active_dialog:
                 current_ev = engine.pending_events[0]
-                if current_ev.type in ["SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD"]:
+                if current_ev.type in ["SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD", "INVENTORY_KEEP"]:
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                         for i, rect in enumerate(pending_selection_rects):
                             if rect.collidepoint(mouse_pos):
@@ -169,6 +197,13 @@ def main():
                                     engine.resolve_shop_free_choice(p, pending_shop_cards, choice_idx)
                                 elif current_ev.type == "CHOOSE_CARD_TO_DISCARD":
                                     engine.resolve_discard_enemy_card(p, current_ev.data["target"], choice_idx)
+                                elif current_ev.type == "INVENTORY_KEEP":
+                                    # Если нажат «Пропустить» — оставляем первую карту
+                                    actual_keep_idx = choice_idx if choice_idx < len(pending_shop_cards) else 0
+                                    engine.resolve_inventory_keep(current_ev.player, actual_keep_idx)
+                                    engine.pending_events.pop(0)
+                                    pending_selection_rects = []
+                                    break
                                 engine.pending_events.pop(0)
                                 pending_selection_rects = []
                                 break
@@ -202,6 +237,11 @@ def main():
                                 engine.move_player(p, steps)
                                 logger.log_event(p.uid, "MOVE", {"steps": steps, "to": p.position})
                                 active_dialog = None
+                            elif pending_finish_result and btn.text == "ОК":
+                                pending_finish_result = None
+                                active_dialog = None
+                                if engine.is_game_over:
+                                    pass  # game over отрисуется ниже
                             elif "Карта" in title:  # Сундучки
                                 game_event = engine.pending_events[0]
                                 engine.resolve_event_card(game_event.player, pending_event_card, pending_event_is_good)
@@ -213,13 +253,33 @@ def main():
                                 active_dialog = None
                                 engine.pending_events.pop(0)
                             elif "Победа!" in title:  # Награда за победу в Схватке
-                                reward_types = ["money", "push", "steal_card"]
+                                reward_types = ["money", "push"]
+                                if duel_defender.hand:
+                                    reward_types.append("steal_card")
                                 engine.resolve_duel_reward_choice(p, duel_defender, reward_types[i])
                                 active_dialog = None
                                 engine.pending_events.pop(0)
+                            elif "Финиш-сейф" in title:
+                                bonus_map = {0: 0, 1: 5, 2: 10}
+                                coin_bonus = bonus_map.get(i, 0)
+                                roll, bonus, total, success = engine.attempt_finish(
+                                    game_event.player, coin_bonus
+                                )
+                                engine.pending_events.pop(0)
+                                result_text = f"Выпало {roll}" + (f"+{bonus}" if bonus else "") + f" = {total}"
+                                if success:
+                                    result_text += " — ПОБЕДА!"
+                                else:
+                                    result_text += " — Не хватило... (нужно 6+)"
+                                active_dialog = Dialog(result_text, ["ОК"])
+                                pending_finish_result = (roll, bonus, total, success)
                             elif "западня" in title:
-                                if i == 0: p.pay(3)
-                                else: engine.move_player(p, 3, is_forward=False)
+                                game_event = engine.pending_events[0]
+                                target_player = game_event.player
+                                if i == 0:
+                                    target_player.pay(3)
+                                else:
+                                    engine.move_player(target_player, 3, is_forward=False)
                                 active_dialog = None
                                 engine.pending_events.pop(0)
                             elif "Смерч" in title:
@@ -236,38 +296,78 @@ def main():
                                 engine.resolve_discard_enemy_card(p, game_event.data["target"], i)
                                 active_dialog = None
                                 engine.pending_events.pop(0)
+                            elif "Налог" in title:
+                                game_event = engine.pending_events[0]
+                                card_idx = game_event.data["card_idx"]
+                                cost = game_event.data["cost"]
+                                if i == 0:  # Заплатить
+                                    if not game_event.player.pay(cost):
+                                        # Не хватает монет — принудительный сброс
+                                        removed = game_event.player.remove_card(card_idx)
+                                        engine.state.deck_shop.discard(removed)
+                                    else:
+                                        card_idx += 1  # Карта осталась, переходим к следующей
+                                else:  # Сбросить
+                                    removed = game_event.player.remove_card(card_idx)
+                                    engine.state.deck_shop.discard(removed)
+                                    # card_idx не меняем — после remove следующая карта сдвинулась на это место
+                                # Проверяем, есть ли ещё карты
+                                if card_idx < len(game_event.player.hand):
+                                    game_event.data["card_idx"] = card_idx  # Обновляем индекс на месте
+                                else:
+                                    engine.pending_events.pop(0)
+                                active_dialog = None
+                            elif "Выбери цель для" in title:
+                                opponents = [opp for opp in engine.state.players if opp.uid != p.uid]
+                                target = opponents[i]
+                                if engine.use_card_from_hand(p_idx, pending_card_use_idx, target_idx=target.uid):
+                                    logger.log_event(p.uid, "CARD_USE", {
+                                        "card": p.hand[pending_card_use_idx].name if pending_card_use_idx < len(
+                                            p.hand) else "?",
+                                        "target": target.name
+                                    })
+                                pending_card_use_idx = None
+                                active_dialog = None
                 continue
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                 if not engine.pending_events and not p.has_moved and not p.turn_checks_done:
                     turn_skipped = engine.start_turn_checks(p)
-                    if turn_skipped:
-                        turn_count += 1
+                    if turn_skipped: continue
+                    if engine.pending_events:
                         continue
-                    if engine.pending_events: continue
-                    rolls = engine.get_roll(p)
-                    options = engine.get_move_options(p, rolls)
-                    if len(options) > 1:
-                        pending_move_options = options
-                        active_dialog = Dialog("Выбери ход", [f"Идти на {o}" for o in options])
+
+                    # Игрок застрял на финише — бросает только на сейф
+                    if p.is_finished:
+                        engine.pending_events.append(GameEvent(
+                            type="FINISH_ROLL", player=p, data={}
+                        ))
+                        p.has_moved = True
                     else:
-                        steps = options[0]
-                        engine.move_player(p, steps)
-                        logger.log_event(p.uid, "MOVE", {"steps": steps, "to": p.position})
+                        rolls = engine.get_roll(p)
+                        options = engine.get_move_options(p, rolls)
+                        if len(options) > 1:
+                            pending_move_options = options
+                            active_dialog = Dialog("Выбери ход", [f"Идти на {o}" for o in options])
+                        else:
+                            steps = options[0]
+                            engine.move_player(p, steps)
+                            logger.log_event(p.uid, "MOVE", {"steps": steps, "to": p.position})
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 # Кнопка завершения хода
                 if p.has_moved and not engine.pending_events:
                     btn_rect = pygame.Rect(WINDOW_SIZE + 50, 850, 200, 60)
                     if btn_rect.collidepoint(mouse_pos):
-                        engine.end_turn_checks(p)
-                        if p.has_extra_turn:
-                            p.has_extra_turn = False
-                            p.reset_turn_flags()
-                            logger.log_event(p.uid, "EXTRA_TURN_START", {"reason": "double_roll"})
-                        else:
-                            engine.state.next_turn()
-                            turn_count += 1
+                        if not p.end_checks_done:
+                            engine.end_turn_checks(p)
+                            p.end_checks_done = True
+                        if not engine.pending_events:
+                            if p.has_extra_turn:
+                                p.has_extra_turn = False
+                                p.reset_turn_flags()
+                            else:
+                                engine.state.next_turn(logger)
                         continue
 
                 # Проверяем клик в зоне сайдбара
@@ -289,7 +389,9 @@ def main():
                                 if engine.use_card_from_hand(p_idx, j, target_idx=opponents[0].uid):
                                     logger.log_event(p.uid, "CARD_USE", {"card": card.name})
                             else:
-                                raise NotImplementedError("Если врагов много - нужен диалог")
+                                pending_card_use_idx = j
+                                options = [opp.name for opp in opponents]
+                                active_dialog = Dialog(f"Выбери цель для «{card.name}»", options)
 
                 # Клик по карте Та-Дам
                 if not active_dialog and not viewing_card_sprite_id:
@@ -315,7 +417,15 @@ def main():
             renderer.draw_large_rule_card(viewing_card_sprite_id, mouse_pos)
         elif engine.pending_events and engine.pending_events[0].type in ["SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD"]:
             ev = engine.pending_events[0]
-            pending_selection_rects = renderer.draw_card_selector(ev.data["cards"], "", mouse_pos)
+            titles = {
+                "SHOP": "Лавка Джо: выбери карту (5 монет)",
+                "SHOP_FREE": "Бесплатная карта Лавки Джо",
+                "CHOOSE_CARD_TO_DISCARD": f"Сбрось карту у {ev.data.get('target', '')}",
+                "INVENTORY_KEEP": f"Инвентаризация: {ev.player.name} — выбери карту, которую оставишь",
+            }
+            pending_selection_rects = renderer.draw_card_selector(
+                ev.data["cards"], titles.get(ev.type, ""), mouse_pos
+            )
         else:
             renderer.draw_hover(mouse_pos)
             if active_slider: active_slider.draw(screen, mouse_pos)
@@ -328,8 +438,19 @@ def main():
         if mine_placement_mode and mine_placement_player:
             renderer.draw_mine_placement_button(mine_placement_player.coins, mouse_pos)
 
-
         pygame.display.flip()
+
+        if engine.is_game_over and engine.winner:
+            overlay = pygame.Surface((WINDOW_SIZE + 300, WINDOW_SIZE), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 160))
+            screen.blit(overlay, (0, 0))
+            font_big = pygame.font.SysFont("Arial", 64, bold=True)
+            win_txt = font_big.render(f"{engine.winner.name} ПОБЕДИЛ!", True, (255, 215, 0))
+            screen.blit(win_txt, (
+                (WINDOW_SIZE + 300) // 2 - win_txt.get_width() // 2,
+                WINDOW_SIZE // 2 - win_txt.get_height() // 2
+            ))
+
         clock.tick(60)
 
     pygame.quit()
