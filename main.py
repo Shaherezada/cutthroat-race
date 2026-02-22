@@ -104,7 +104,11 @@ def main():
                 )
             elif game_event.type == "TORNADO_DECISION":
                 pending_tornado_target = game_event.data["target_pos"]
-                active_dialog = Dialog(f"Смерч: {event_player.name}", ["Откупиться (10 монет)", "Лететь к Смерчу!"])
+                if event_player.coins >= 10:
+                    active_dialog = Dialog(f"Смерч: {event_player.name}", ["Откупиться (10 монет)", "Лететь к Смерчу!"])
+                else:
+                    engine.resolve_tornado_choice(event_player, 1, game_event.data["target_pos"])
+                    engine.pending_events.pop(0)
             elif game_event.type == "CHOOSE_TARGET":
                 options = [f"{opp.name}" for opp in game_event.data["opponents"]]
                 active_dialog = Dialog(f"{event_player}: Выбери цель", options)
@@ -131,14 +135,14 @@ def main():
 
         if not p.turn_checks_done and not p.has_moved \
                 and not engine.pending_events and not active_dialog \
-                and not active_slider and not viewing_card_sprite_id:
+                and not active_slider and not viewing_card_sprite_id and not mine_placement_mode:
             turn_skipped = engine.start_turn_checks(p)
             if turn_skipped:
                 p = engine.state.current_player # синхронизируем локальную ссылку
                 continue # пропускаем остаток итерации и сразу начинаем новую
 
         # Логика завершения хода
-        if p.has_moved and not engine.pending_events and not active_dialog and not viewing_card_sprite_id:
+        if p.has_moved and not engine.pending_events and not active_dialog and not viewing_card_sprite_id and not mine_placement_mode:
             if not p.end_checks_done:
                 if not engine.can_player_do_actions(p):
                     engine.end_turn_checks(p)
@@ -200,7 +204,8 @@ def main():
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                         for i, rect in enumerate(pending_selection_rects):
                             if rect.collidepoint(mouse_pos):
-                                choice_idx = i if i < len(pending_selection_rects) - 1 else 2
+                                is_skip_btn = current_ev.type == "SHOP" and i == len(pending_selection_rects) - 1
+                                choice_idx = 2 if is_skip_btn else i
                                 if current_ev.type == "SHOP":
                                     engine.resolve_shop_choice(p, pending_shop_cards, choice_idx)
                                 elif current_ev.type == "SHOP_FREE":
@@ -236,6 +241,9 @@ def main():
                             engine.placed_mines[cell_id] = mine_placement_player.uid
                             logger.log_event(mine_placement_player.uid, "MINE_PLACED", {"cell": cell_id})
                 continue  # не обрабатываем другие клики в этом режиме
+            if mine_placement_mode and mine_placement_player and mine_placement_player.coins <= 0:
+                mine_placement_mode = False
+                mine_placement_player = None
 
             if active_dialog:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -244,7 +252,7 @@ def main():
                             title = active_dialog.title
                             if "Выбери ход" in title:
                                 steps = pending_move_options[i]
-                                engine.move_player(p, steps)
+                                engine.move_player(p, steps, is_own_move=True)
                                 active_dialog = None
                             elif pending_finish_result and btn.text == "ОК":
                                 pending_finish_result = None
@@ -262,10 +270,11 @@ def main():
                                 active_dialog = None
                                 engine.pending_events.pop(0)
                             elif "Победа!" in title:  # Награда за победу в Схватке
+                                game_event = engine.pending_events[0]
                                 reward_types = ["money", "push"]
                                 if duel_defender.hand:
                                     reward_types.append("steal_card")
-                                engine.resolve_duel_reward_choice(p, duel_defender, reward_types[i])
+                                engine.resolve_duel_reward_choice(game_event.player, duel_defender, reward_types[i])
                                 active_dialog = None
                                 engine.pending_events.pop(0)
                             elif "Финиш-сейф" in title:
@@ -355,7 +364,7 @@ def main():
                             active_dialog = Dialog("Выбери ход", [f"Идти на {o}" for o in options])
                         else:
                             steps = options[0]
-                            engine.move_player(p, steps)
+                            engine.move_player(p, steps, is_own_move=True)
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 # Кнопка завершения хода
@@ -385,10 +394,10 @@ def main():
                             if len(opponents) == 1:
                                 if engine.use_card_from_hand(p_idx, j, target_idx=opponents[0].uid):
                                     logger.log_event(p.uid, "CARD_USE", {"card": card.name})
-                                else:
-                                    pending_card_use_idx = j
-                                    active_dialog = Dialog(f"Выбери цель для «{card.name}»",
-                                                           [opp.name for opp in opponents])
+                            else:
+                                pending_card_use_idx = j
+                                active_dialog = Dialog(f"Выбери цель для «{card.name}»",
+                                                       [opp.name for opp in opponents])
 
                 # Клик по карте Та-Дам
                 if not active_dialog and not viewing_card_sprite_id:
@@ -412,7 +421,7 @@ def main():
 
         if viewing_card_sprite_id:
             renderer.draw_large_rule_card(viewing_card_sprite_id, mouse_pos)
-        elif engine.pending_events and engine.pending_events[0].type in ["SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD"]:
+        elif engine.pending_events and engine.pending_events[0].type in ["SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD", "INVENTORY_KEEP"]:
             ev = engine.pending_events[0]
             titles = {
                 "SHOP": "Лавка Джо: выбери карту (5 монет)",
@@ -450,6 +459,10 @@ def main():
                 (WINDOW_SIZE + 300) // 2 - win_txt.get_width() // 2,
                 WINDOW_SIZE // 2 - win_txt.get_height() // 2
             ))
+            pygame.display.flip()
+            pygame.time.wait(3000)
+            running = False
+            continue
 
         clock.tick(60)
 
