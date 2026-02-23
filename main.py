@@ -112,9 +112,6 @@ def main():
             elif game_event.type == "CHOOSE_TARGET":
                 options = [f"{opp.name}" for opp in game_event.data["opponents"]]
                 active_dialog = Dialog(f"{event_player}: Выбери цель", options)
-            elif game_event.type == "CHOOSE_CARD_TO_DISCARD":
-                options = [f"{c.name}" for c in game_event.data["cards"]]
-                active_dialog = Dialog(f"{event_player}: Сбрось карту у {game_event.data['target'].name}", options)
             elif game_event.type == "MINE_PLACEMENT":
                 mine_placement_mode = True
                 mine_placement_player = event_player
@@ -426,12 +423,12 @@ def main():
             titles = {
                 "SHOP": "Лавка Джо: выбери карту (5 монет)",
                 "SHOP_FREE": "Бесплатная карта Лавки Джо",
-                "CHOOSE_CARD_TO_DISCARD": f"Сбрось карту у {ev.data.get('target', '')}",
+                "CHOOSE_CARD_TO_DISCARD": f"Сбрось карту у {ev.data['target'].name}",
                 "INVENTORY_KEEP": f"Инвентаризация: {ev.player.name} — выбери карту, которую оставишь",
             }
             pending_selection_rects = renderer.draw_card_selector(
                 ev.data["cards"], titles.get(ev.type, ""), mouse_pos,
-                show_skip=(ev.type != "SHOP_FREE")
+                show_skip=(ev.type not in ["SHOP_FREE", "CHOOSE_CARD_TO_DISCARD"])
             )
         else:
             renderer.draw_hover(mouse_pos)

@@ -162,19 +162,27 @@ class GameEngine:
         self._trigger_cell_effect(player, cell)
 
     def _check_passives(self, player: Player, cell):
-        """Проверка пассивных карт (магнит, клевер, траволатор)."""
         for card in player.hand:
             if not isinstance(card, ShopCard) or not card.is_passive:
                 continue
 
             if card.effect_id == "passive_red_income" and cell.type == CellType.RED:
                 player.add_coins(card.value)
+                self.logger.log_event(player.uid, "PASSIVE_TRIGGER", {
+                    "card": card.name, "effect": card.effect_id, "gain": card.value
+                })
             elif card.effect_id == "passive_empty_income" and cell.type == CellType.EMPTY:
                 player.add_coins(card.value)
+                self.logger.log_event(player.uid, "PASSIVE_TRIGGER", {
+                    "card": card.name, "effect": card.effect_id, "gain": card.value
+                })
             elif card.effect_id == "passive_empty_move" and cell.type == CellType.EMPTY:
-                self.move_player(player, card.value)  # Рекурсивный прыжок вперед
+                self.logger.log_event(player.uid, "PASSIVE_TRIGGER", {
+                    "card": card.name, "effect": card.effect_id, "move": card.value
+                })
+                self.move_player(player, card.value)
             elif card.effect_id == "passive_roll_plus_1":
-                pass  # Обрабатывается в логике броска (в UI или Engine до вызова move)
+                pass
 
     def start_turn_checks(self, player: Player):
         """Для правил, действующих в начале хода (бонусы отстающим и т.д.)"""
@@ -909,9 +917,11 @@ class GameEngine:
 
     def resolve_discard_enemy_card(self, source: Player, target: Player, card_idx: int):
         card = target.remove_card(card_idx)
-        self.logger.log_event(source.uid, "EFFECT_DISCARD_CHOICE", {
-            "target": target.name, "card": card.name
-        })
+        if card:
+            self.state.deck_shop.discard(card)
+            self.logger.log_event(source.uid, "EFFECT_DISCARD_CHOICE", {
+                "target": target.name, "card": card.name
+            })
 
     def resolve_slider_input(self, player: Player, coins_spent: int, effect_data: dict):
         """
