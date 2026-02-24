@@ -10,7 +10,7 @@ class ViewConfig:
         self.scale = target_size / original_size
         self.target_size = target_size
 
-    def get_screen_coords(self, cell_id: int) -> tuple:
+    def get_screen_coords(self, cell_id: int | str) -> tuple:
         key = str(cell_id)
         if key not in self.raw_coords:return 0, 0
         x, y = self.raw_coords[key]
