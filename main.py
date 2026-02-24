@@ -50,6 +50,7 @@ def main():
         mouse_pos = pygame.mouse.get_pos()
         elapsed_seconds = (pygame.time.get_ticks() - start_ticks) // 1000
         p = engine.state.current_player
+        p_idx = engine.state.current_player_idx
 
         # 1. Обработка очереди событий (делаем это только если сейчас нет активных окон)
         if engine.pending_events and not active_dialog and not active_slider and not viewing_card_sprite_id:
@@ -208,7 +209,10 @@ def main():
                                 elif current_ev.type == "SHOP_FREE":
                                     engine.resolve_shop_free_choice(p, pending_shop_cards, choice_idx)
                                 elif current_ev.type == "CHOOSE_CARD_TO_DISCARD":
-                                    engine.resolve_discard_enemy_card(p, current_ev.data["target"], choice_idx)
+                                    engine.resolve_discard_enemy_card(
+                                        p, current_ev.data["target"], choice_idx,
+                                        steal=current_ev.data.get("steal", False)
+                                    )
                                 elif current_ev.type == "INVENTORY_KEEP":
                                     # Если нажат «Пропустить» — оставляем первую карту
                                     actual_keep_idx = choice_idx if choice_idx < len(pending_shop_cards) else 0

@@ -548,12 +548,18 @@ class GameEngine:
             self.move_player(loser, 10, is_forward=False)
 
         elif reward_type == 'steal_card':
-            # Забрать карту Лавки Джо по индексу
-            card = loser.remove_card(card_idx)
-            if card:
+            if not loser.hand:
+                return
+            if len(loser.hand) == 1:
+                card = loser.remove_card(0)
                 if not winner.add_card(card):
-                    # Если у победителя нет места, карта уходит в сброс лавки
                     self.state.deck_shop.discard(card)
+            else:
+                self.pending_events.append(GameEvent(
+                    type="CHOOSE_CARD_TO_DISCARD",
+                    player=winner,
+                    data={"target": loser, "cards": loser.hand, "steal": True}
+                ))
 
     def resolve_event_card(self, player: Player, card: EventCard, is_good: bool):
         """Разыгрывает карту из сундучка"""
@@ -915,10 +921,13 @@ class GameEngine:
         target = next(p for p in self.state.players if p.uid == target_uid)
         self._execute_targeted_logic(effect_id, source, target, value)
 
-    def resolve_discard_enemy_card(self, source: Player, target: Player, card_idx: int):
+    def resolve_discard_enemy_card(self, source: Player, target: Player, card_idx: int, steal: bool = False):
         card = target.remove_card(card_idx)
         if card:
-            self.state.deck_shop.discard(card)
+            if steal and source.add_card(card):
+                pass  # карта перешла победителю
+            else:
+                self.state.deck_shop.discard(card)
             self.logger.log_event(source.uid, "EFFECT_DISCARD_CHOICE", {
                 "target": target.name, "card": card.name
             })
