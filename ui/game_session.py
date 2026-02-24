@@ -40,7 +40,10 @@ class GameSession:
     def tick(self, events: list, mouse_pos: tuple, elapsed_seconds: int, turn_count: int):
         """Один кадр: события движка → ввод → отрисовка"""
         self._process_pending_events()
-        self._run_auto_turn_logic()
+
+        if not self.ui.is_busy and not self.engine.pending_events:
+            self.engine.try_advance_turn(self.p)
+
         self.handle_input(events, mouse_pos)
         self.draw(mouse_pos, elapsed_seconds, turn_count)
 
@@ -157,34 +160,6 @@ class GameSession:
         self.ui.pending_shop_cards = ev.data["cards"]
 
     # ------------------------------------------------------------------
-    # Автоматическая логика смены хода
-    # ------------------------------------------------------------------
-
-    def _run_auto_turn_logic(self):
-        eng, ui = self.engine, self.ui
-        p = self.p
-        if ui.is_busy or eng.pending_events:
-            return
-
-        if not p.turn_checks_done and not p.has_moved:
-            skipped = eng.start_turn_checks(p)
-            if skipped:
-                return
-
-        if p.has_moved and not p.end_checks_done:
-            if not eng.can_player_do_actions(p):
-                eng.end_turn_checks(p)
-                p.end_checks_done = True
-
-        if p.has_moved and p.end_checks_done and not eng.pending_events:
-            if p.has_extra_turn:
-                p.has_extra_turn = False
-                p.reset_turn_flags()
-                self.logger.log_event(p.uid, "EXTRA_TURN_START", {})
-            else:
-                eng.state.next_turn(self.logger)
-
-    # ------------------------------------------------------------------
     # Обработка ввода
     # ------------------------------------------------------------------
 
@@ -281,10 +256,12 @@ class GameSession:
             return
         if mouse_pos[0] < WINDOW_SIZE and ui.mine_placement_player.coins > 0:
             cell_id = self.view_cfg.get_cell_under_mouse(mouse_pos, radius=35)
-            if cell_id != -1 and cell_id not in eng.placed_mines:
-                ui.mine_placement_player.pay(1)
-                eng.placed_mines[cell_id] = ui.mine_placement_player.uid
-                self.logger.log_event(ui.mine_placement_player.uid, "MINE_PLACED", {"cell": cell_id})
+            if cell_id != -1:
+                cell_id = int(cell_id)
+                if cell_id not in eng.placed_mines:
+                    ui.mine_placement_player.pay(1)
+                    eng.placed_mines[cell_id] = ui.mine_placement_player.uid
+                    self.logger.log_event(ui.mine_placement_player.uid, "MINE_PLACED", {"cell": cell_id})
         if ui.mine_placement_player and ui.mine_placement_player.coins <= 0:
             ui.mine_placement_mode = False
             ui.mine_placement_player = None
@@ -390,13 +367,14 @@ class GameSession:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             # Кнопка завершения хода
             if p.has_moved and not eng.pending_events:
-                btn_rect = pygame.Rect(WINDOW_SIZE + 50, 850, 200, 60)
-                if btn_rect.collidepoint(mouse_pos):
+                if ui.end_turn_btn_rect and ui.end_turn_btn_rect.collidepoint(mouse_pos):
                     if not p.end_checks_done:
-                        eng.end_turn_checks(p); p.end_checks_done = True
+                        eng.end_turn_checks(p)
+                        p.end_checks_done = True
                     if not eng.pending_events:
                         if p.has_extra_turn:
-                            p.has_extra_turn = False; p.reset_turn_flags()
+                            p.has_extra_turn = False
+                            p.reset_turn_flags()
                         else:
                             eng.state.next_turn(self.logger)
                     return
@@ -466,7 +444,7 @@ class GameSession:
         can_act = eng.can_player_do_actions(self.p) if self.p.has_moved else False
         has_pending = bool(eng.pending_events or ui.active_dialog or ui.active_slider
                           or ui.viewing_card_sprite_id or ui.mine_placement_mode)
-        _, ui.sidebar_card_rects = r.draw_sidebar(
+        ui.end_turn_btn_rect, ui.sidebar_card_rects = r.draw_sidebar(
             eng.state, turn_count, elapsed_seconds, can_act, has_pending)
 
         if ui.mine_placement_mode and ui.mine_placement_player:

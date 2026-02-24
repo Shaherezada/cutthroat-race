@@ -246,6 +246,25 @@ class GameEngine:
                     })
                     self.move_player(player, rule.value)
 
+    def try_advance_turn(self, player: Player):
+        """Вызывается после любого действия игрока"""
+        if not player.has_moved:
+            return
+        if self.can_player_do_actions(player):
+            return  # ждём действий игрока
+        if not player.end_checks_done:
+            self.end_turn_checks(player)
+            player.end_checks_done = True
+        if not self.pending_events:
+            self._do_next_turn(player)
+
+    def _do_next_turn(self, player: Player):
+        if player.has_extra_turn:
+            player.has_extra_turn = False
+            player.reset_turn_flags()
+        else:
+            self.state.next_turn(self.logger)
+
     def _check_global_rules(self, player: Player, cell):
         """Проверка правил Та-Дам после броска на передвижение."""
         for rule in self.state.active_rules:

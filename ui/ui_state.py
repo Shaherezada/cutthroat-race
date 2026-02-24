@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, List, TYPE_CHECKING
+import pygame
 
 if TYPE_CHECKING:
     from ui.components import Dialog, SliderDialog
@@ -20,6 +21,7 @@ class UIState:
     pending_selection_rects: list = field(default_factory=list)
     sidebar_card_rects: list = field(default_factory=list)
     pending_card_use_idx: Optional[int] = None
+    end_turn_btn_rect: Optional[pygame.Rect] = None
 
     # Та-Дам
     pending_tadam_rule: Optional[RuleCard] = None

@@ -288,7 +288,7 @@ class Renderer:
     def draw_mines(self, placed_mines: dict):
         """Рисует мины на доске."""
         for cell_id in placed_mines:
-            pos = self.view_cfg.get_screen_coords(int(cell_id))
+            pos = self.view_cfg.get_screen_coords(cell_id)
             sprite = self.coin_sprites_board.get(1)
             if sprite:
                 self.screen.blit(sprite, (pos[0] - 26, pos[1] - 26))
