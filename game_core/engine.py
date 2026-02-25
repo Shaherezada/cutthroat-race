@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
 from game_core.config import CellType, WINNING_ROLL
 from game_core.board import Board
+from game_core.effects import EffectResolver
 from game_core.logger import GameLogger
 from game_core.state import GameState, Player
 from game_core.cards import Card, ShopCard, EventCard, RuleCard
@@ -23,6 +24,7 @@ class GameEngine:
         self.winner: Optional[Player] = None
         self.placed_mines: Dict[int, int] = {} # Для хранения мин (карта Хорошо): {cell_id: owner_uid}
         self.pending_events: List[GameEvent] = []
+        self.effects = EffectResolver(self)
 
     def get_roll(self, player: Player) -> List[int]:
         pos = player.position
@@ -247,16 +249,36 @@ class GameEngine:
                     self.move_player(player, rule.value)
 
     def try_advance_turn(self, player: Player):
-        """Вызывается после любого действия игрока"""
+        """Вызывается после любого действия игрока, управляет жизненным циклом хода"""
+        # 1. Если ход игрока только начался (он еще не двигался и проверки не пройдены)
+        if not player.turn_checks_done and not player.has_moved:
+            # Запускаем проверки (бонусы отстающим, пропуски хода и т.д.)
+            self.start_turn_checks(player)
+            return
+
+        # 2. Если игрок еще не совершил основной бросок — ждем нажатия Пробела
         if not player.has_moved:
             return
+
+        # 3. Если в очереди висят события (диалоги/выборы) — ждем их разрешения
+        if self.pending_events:
+            return
+
+        # 4. Проверяем, может ли игрок совершить доп. действия (использовать карты)
         if self.can_player_do_actions(player):
-            return  # ждём действий игрока
+            return  # Ждем нажатия кнопки "Завершить ход" или использования карт
+
+        # 5. Если делать больше нечего — проводим финальные проверки (конец хода)
         if not player.end_checks_done:
             self.end_turn_checks(player)
             player.end_checks_done = True
-        if not self.pending_events:
-            self._do_next_turn(player)
+
+            # Если финальные проверки создали события (например, Смерч от Та-Дам), прерываемся
+            if self.pending_events:
+                return
+
+        # 6. Передаем ход
+        self._do_next_turn(player)
 
     def _do_next_turn(self, player: Player):
         if player.has_extra_turn:
@@ -561,17 +583,23 @@ class GameEngine:
             amount = min(loser.coins, 10)
             loser.pay(amount)
             winner.add_coins(amount)
+            self.logger.log_event(winner.uid, "DUEL_REWARD",
+                                  {"choice": "money", "target": loser.name, "amount": amount})
 
         elif reward_type == 'push':
             # Отпихнуть на 10 клеток назад
             self.move_player(loser, 10, is_forward=False)
+            self.logger.log_event(winner.uid, "DUEL_REWARD", {"choice": "push", "target": loser.name, "steps": 10})
 
         elif reward_type == 'steal_card':
             if not loser.hand:
                 return
             if len(loser.hand) == 1:
                 card = loser.remove_card(0)
-                if not winner.add_card(card):
+                if winner.add_card(card):
+                    self.logger.log_event(winner.uid, "DUEL_REWARD",
+                                          {"choice": "steal_card", "target": loser.name, "card": card.name})
+                else:
                     self.state.deck_shop.discard(card)
             else:
                 self.pending_events.append(GameEvent(
@@ -596,349 +624,11 @@ class GameEngine:
         self.state.deck_events.discard(card)
 
     def apply_effect(self, effect_id: str, source: Player, value: int = 0, target: Optional[Player] = None):
-        """
-        Маппинг строковых ID эффектов на код.
-        :param target: Нужен для карт-атак (Гарпун, Воровство и т.д.)
-        """
-
-        # --- БАЗОВОЕ ДВИЖЕНИЕ И ДЕНЬГИ ---
-        if effect_id == "gain_coins": source.add_coins(value)
-        elif effect_id == "lose_coins":
-            amount = min(source.coins, value)
-            source.pay(amount)
-        elif effect_id == "move_self_forward": self.move_player(source, value)
-        elif effect_id == "move_self_back": self.move_player(source, value, is_forward=False)
-        elif effect_id == "no_effect": pass
-        elif effect_id == "move_forward_gain_coins":
-            self.move_player(source, value)
-            source.add_coins(value)
-
-        # --- СЛОЖНЫЕ ПЕРЕМЕЩЕНИЯ ---
-        elif effect_id == "move_nearest_green":
-            curr = source.position
-            found = False
-            for i in range(curr + 1, self.board.max_cell_id):
-                if self.board.get_cell(i).type == CellType.GREEN:
-                    self.move_player(source, i - curr)
-                    found = True
-                    break
-            if not found: self.move_player(source, 3)  # Если впереди нет зеленой
-
-        elif effect_id == "move_back_to_red_or_3":
-            found = False
-            for i in range(source.position - 1, -1, -1):
-                if self.board.get_cell(i).type == CellType.RED:
-                    source.position = i
-                    found = True
-                    break
-            if not found: self.move_player(source, 3, is_forward=False)
-
-        # --- ВЗАИМОДЕЙСТВИЕ С ИГРОКАМИ (МАССОВОЕ) ---
-        elif effect_id == "pay_all_others_bank":
-            for p in self.state.players:
-                if p.uid != source.uid: p.add_coins(value)
-
-        elif effect_id == "steal_coins_from_all":
-            for p in self.state.players:
-                if p.uid != source.uid:
-                    if p.pay(value): source.add_coins(value)
-
-        elif effect_id == "others_move_forward":
-            for p in self.state.players:
-                if p.uid != source.uid: self.move_player(p, value, apply_effects=False)
-
-        elif effect_id == "all_lose_coins_global":
-            for p in self.state.players:
-                amount = min(p.coins, value)
-                p.pay(amount)
-
-        elif effect_id == "others_gain_coins_move":
-            for p in self.state.players:
-                if p.uid != source.uid:
-                    p.add_coins(value)
-                    self.move_player(p, value, apply_effects=False)
-
-        elif effect_id == "steal_2_from_all":
-            for p in self.state.players:
-                if p.uid != source.uid:
-                    amount = min(p.coins, value)
-                    if p.pay(amount):
-                        source.add_coins(amount)
-
-        elif effect_id == "draw_2_bad":
-            for _ in range(2):
-                card = self.state.deck_events.draw(1)[0]
-                self.pending_events.append(GameEvent(
-                    type="EVENT_CARD",
-                    player=source,
-                    data={"card": card, "is_good": False}
-                ))
-
-        # --- ЭФФЕКТЫ С ВЫБОРОМ (UI REQUIRED) ---
-        elif effect_id == "pay_coins_move_flexible":
-            # Создаем событие с запросом на ввод количества монет через слайдер
-            # value содержит множитель (сколько клеток за монету)
-            max_coins = min(5, source.coins) if value > 0 else source.coins  # Для форсажа - все монеты, для ускорения - до 5
-            if max_coins == 0:
-                return  # Нет монет - ничего не делаем
-
-            if value == 2: description = "За каждую сброшенную монету передвинься на 2 клетки вперёд."
-            else: description = "Сбрось сколько угодно монет, передвинься на столько же клеток вперёд."
-
-            self.pending_events.append(GameEvent(
-                type="SLIDER_INPUT",
-                player=source,
-                data={
-                    "effect_id": effect_id,
-                    "max_value": max_coins,
-                    "multiplier": value if value != 0 else 1,
-                    "title": "Сбросить монеты",
-                    "description": description,
-                    "target_self": True,
-                }
-            ))
-
-        elif effect_id == "place_mines":
-            self.pending_events.append(GameEvent(
-                type="MINE_PLACEMENT",
-                player=source,
-                data={"cost_per_mine": value}  # value=1
-            ))
-
-        elif effect_id == "tax_shop_cards":
-            if not source.hand:
-                return
-            self.pending_events.append(GameEvent(
-                type="TAX_SHOP_CARD",
-                player=source,
-                data={"card_idx": 0, "cost": value}  # value=3
-            ))
-
-        elif effect_id == "all_discard_to_one_shop_card":
-            for pl in self.state.players:
-                if len(pl.hand) > 1:
-                    self.pending_events.append(GameEvent(
-                        type="INVENTORY_KEEP",
-                        player=pl,
-                        data={"cards": pl.hand}
-                    ))
-
-        elif effect_id == "draw_2_keep_1_free":
-            cards = self.state.deck_shop.draw(2)
-            self.pending_events.append(GameEvent(
-                type="SHOP_FREE",
-                player=source,
-                data={"cards": cards}
-            ))
-
-        elif effect_id == "pay_coins_move_others_back":
-            max_coins = source.coins
-            if max_coins == 0: return
-            max_useful = min(p.position for p in self.state.players if p.uid != source.uid)
-            if max_useful == 0: return
-            max_coins = min(max_coins, max_useful)
-
-            self.pending_events.append(GameEvent(
-                type="SLIDER_INPUT",
-                player=source,
-                data={
-                    "effect_id": effect_id,
-                    "max_value": max_coins,
-                    "multiplier": -1,
-                    "title": "Саботаж",
-                    "description": "Сбрось любое количество монет. Остальные игроки передвинутся на столько же клеток назад.",
-                    "target_self": False
-                }
-            ))
-
-        elif effect_id == "discard_shop_or_red":
-            if not source.hand:
-                self.apply_effect("move_back_to_red_or_3", source)
-            elif len(source.hand) == 1:
-                card = source.remove_card(0)
-                self.state.deck_shop.discard(card)
-            else:
-                self.pending_events.append(GameEvent(
-                    type="CHOOSE_CARD_TO_DISCARD",
-                    player=source,
-                    data={"target": source, "cards": source.hand}
-                ))
-
-        elif effect_id == "extra_turn_pay_coins":
-            if source.pay(value):  # value = 2
-                source.has_extra_turn = True
-                self.logger.log_event(source.uid, "EXTRA_TURN_PAID", {"cost": value})
-
-        # --- РАНДОМ И КУБИКИ ---
-        elif effect_id == "roll_lose_coins_or_move_back":
-            roll = random.randint(1, 6)
-            if roll <= 3:
-                source.pay(5)
-                self.logger.log_event(source.uid, "ROLL_EFFECT", {"roll": roll, "result": "lose_coins", "value": 5})
-            else:
-                self.move_player(source, 10, is_forward=False)
-                self.logger.log_event(source.uid, "ROLL_EFFECT", {"roll": roll, "result": "move_back", "value": 10})
-
-        elif effect_id == "roll_gamble_money_move":
-            roll = random.randint(1, 6)
-            if roll <= 3:
-                source.add_coins(10)
-                self.logger.log_event(source.uid, "ROLL_EFFECT", {"roll": roll, "result": "gain_coins", "value": 10})
-            else:
-                self.move_player(source, 5)
-                self.logger.log_event(source.uid, "ROLL_EFFECT", {"roll": roll, "result": "move_forward", "value": 5})
-
-        # target required
-        elif effect_id in ["steal_coins_target", "force_enemy_draw_bad", "discard_enemy_shop_card", "roll_push_enemy",
-                           "give_5_to_target", "give_10_to_target", "force_enemy_lose_coins", "give_double_turn_enemy",
-                           "steal_shop_card_leader", "skip_turn_mutual"]:
-            if effect_id == "steal_shop_card_leader":
-                opponents = [p for p in self.state.players if p.uid != source.uid and p.position > source.position]
-                if not opponents:
-                    return
-            else:
-                opponents = [p for p in self.state.players if p.uid != source.uid]
-
-            if target:
-                self._execute_targeted_logic(effect_id, source, target, value)
-                return
-
-            if len(opponents) == 1:
-                self._execute_targeted_logic(effect_id, source, opponents[0], value)
-            else:
-                self.pending_events.append(GameEvent(
-                    type="CHOOSE_TARGET",
-                    player=source,
-                    data={'effect_id': effect_id, "value": value, "opponents": opponents}
-                ))
-
-        # --- ТА-ДАМ ГЛОБАЛЬНЫЕ ПРАВИЛА ---
-        elif effect_id == "rule_red_choice":
-            self.pending_events.append(GameEvent(
-                type="RED_CHOICE",
-                player=source,
-                data={}
-            ))
-
-        else:
-            print(f"DEBUG: Эффект {effect_id} еще не имеет реализации.")
-
-    def _execute_targeted_logic(self, effect_id: str, source: Player, target: Player, value: int):
-        if effect_id == "steal_coins_target":
-            amount = min(target.coins, value)
-            if target.pay(amount):
-                source.add_coins(amount)
-                self.logger.log_event(source.uid, "EFFECT_STEAL", {
-                    "from": target.name,
-                    "target_uid": target.uid,
-                    "amount": amount
-                })
-
-        elif effect_id == "force_enemy_draw_bad":
-            card = self.state.deck_events.draw(1)[0]
-            self.pending_events.append(GameEvent(
-                type="EVENT_CARD",
-                player=target,
-                data={"card": card, "is_good": False}
-            ))
-            self.logger.log_event(source.uid, "EFFECT_FORCE_DRAW_BAD", {
-                "target": target.name,
-                "target_uid": target.uid,
-                "card": card.bad_side.name
-            })
-
-        elif effect_id == "discard_enemy_shop_card":
-            if not target.hand:
-                print(f"У игрока {target.name} нет карт для сброса")
-                return
-
-            if len(target.hand) == 1:
-                card = target.remove_card(0)
-                self.state.deck_shop.discard(card)
-                self.logger.log_event(source.uid, "EFFECT_DISCARD", {
-                    "target": target.name, "card": card.name
-                })
-            else:
-                self.pending_events.append(GameEvent(
-                    type="CHOOSE_CARD_TO_DISCARD",
-                    player=source,
-                    data={"target": target, "cards": target.hand}
-                ))
-
-        elif effect_id == "roll_push_enemy":
-            if not target:
-                opponents = [p for p in self.state.players if p.uid != source.uid]
-                if len(opponents) == 1:
-                    target = opponents[0]
-                else:
-                    self.pending_events.append(GameEvent(
-                        type="CHOOSE_TARGET",
-                        player=source,
-                        data={'effect_id': effect_id, "value": 0, "opponents": opponents}
-                    ))
-                    return
-
-            roll = random.randint(1, 6)
-            self.move_player(target, roll, apply_effects=False)
-            self.logger.log_event(source.uid, "EFFECT_PUSH", {
-                "target": target.name, "roll": roll
-            })
-
-        elif effect_id in ["give_5_to_target", "give_10_to_target"]:
-            amount = min(source.coins, value)
-            source.pay(amount)
-            target.add_coins(amount)
-            self.logger.log_event(source.uid, "EFFECT_GIVE", {"to": target.name, "amount": amount})
-
-        elif effect_id == "force_enemy_lose_coins":
-            opponents = [p for p in self.state.players if p.uid != source.uid]
-            if target:
-                amount = min(target.coins, value)
-                target.pay(amount)
-                self.logger.log_event(source.uid, "EFFECT_FORCE_LOSE", {
-                    "target": target.name, "amount": amount
-                })
-            elif len(opponents) == 1:
-                opponents[0].pay(value)
-            else:
-                self.pending_events.append(GameEvent(
-                    type="CHOOSE_TARGET",
-                    player=source,
-                    data={'effect_id': effect_id, "value": value, "opponents": opponents}
-                ))
-
-        elif effect_id == "give_double_turn_enemy":
-            target.pending_extra_turn = True
-            self.logger.log_event(source.uid, "EFFECT_DOUBLE_TURN", {"target": target.name})
-
-        elif effect_id == "steal_shop_card_leader":
-            if not target.hand:
-                return
-
-            if len(target.hand) == 1:
-                card = target.remove_card(0)
-                if source.add_card(card):
-                    self.logger.log_event(source.uid, "EFFECT_STEAL_CARD", {
-                        "target": target.name, "card": card.name
-                    })
-                else:
-                    self.state.deck_shop.discard(card)
-            else:
-                self.pending_events.append(GameEvent(
-                    type="CHOOSE_CARD_TO_DISCARD",
-                    player=source,
-                    data={"target": target, "cards": target.hand}
-                ))
-
-        elif effect_id == "skip_turn_mutual":
-            source.skip_next_turn = True
-            if len(self.state.players) > 2:
-                target.skip_next_turn = True
-            self.logger.log_event(source.uid, "SKIP_TURN_MUTUAL", {"target": target.name})
+        self.effects.resolve(effect_id, source, value, target)
 
     def resolve_target_choice(self, source: Player, target_uid: int, effect_id: str, value: int):
         target = next(p for p in self.state.players if p.uid == target_uid)
-        self._execute_targeted_logic(effect_id, source, target, value)
+        self.effects.execute_targeted(effect_id, source, target, value)
 
     def resolve_discard_enemy_card(self, source: Player, target: Player, card_idx: int, steal: bool = False):
         card = target.remove_card(card_idx)
@@ -1034,6 +724,7 @@ class GameEngine:
                 data={"card": bad_card, "is_good": False}
             ))
         elif eid == "move_rocket":
+            self.logger.log_event(player.uid, "CARD_ROCKET_USE", {"steps": card.value})
             self.move_player(player, card.value)
             if player.is_finished:
                 player.has_moved = True

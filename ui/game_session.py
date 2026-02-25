@@ -99,10 +99,18 @@ class GameSession:
         ui.active_dialog = Dialog(f"{ep.name}: {title}: {side.name.upper()}", [side.description, "ОК"])
 
     def _open_finish_roll(self, _ev, ep):
-        opts = ["Бросить (без бонуса)"]
-        if ep.coins >= 5:  opts.append("Сбросить 5 монет (+1 к броску)")
-        if ep.coins >= 10: opts.append("Сбросить 10 монет (+2 к броску)")
-        self.ui.active_dialog = Dialog(f"{ep.name}: Финиш-сейф! Нужно 6+", opts)
+        # Если денег нет даже на минимальный бонус - бросаем сразу
+        if ep.coins < 5:
+            roll, bonus, total, success = self.engine.attempt_finish(ep, 0)
+            self.engine.pending_events.pop(0)  # Убираем текущее событие вызова
+            result_text = f"Выпало {roll} = {total}"
+            result_text += " — ПОБЕДА!" if success else " — Не хватило... (нужно 6+)"
+            self.ui.active_dialog = Dialog(result_text, ["ОК"])
+            self.ui.pending_finish_result = (roll, bonus, total, success)
+        else:
+            opts = ["Бросить (без бонуса)", "Сбросить 5 монет (+1 к броску)"]
+            if ep.coins >= 10: opts.append("Сбросить 10 монет (+2 к броску)")
+            self.ui.active_dialog = Dialog(f"{ep.name}: Финиш-сейф! Нужно 6+", opts)
 
     def _open_red_choice(self, _ev, ep):
         self.ui.active_dialog = Dialog(f"{ep.name}: Красная западня",
