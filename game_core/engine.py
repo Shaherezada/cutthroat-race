@@ -137,7 +137,13 @@ class GameEngine:
             })
             cell = self.board.get_cell(player.position)
             if cell.type == CellType.PORTAL and cell.portal_target is not None:
+                old_pos = player.position
                 player.position = cell.portal_target
+                self.logger.log_event(player.uid, "PORTAL", {
+                    "from": old_pos,
+                    "to": cell.portal_target,
+                    "name": cell.name
+                })
             elif apply_effects:
                 self._handle_landing(player)
 
@@ -393,8 +399,7 @@ class GameEngine:
             pass
 
         elif ctype == CellType.PORTAL:
-            if cell.portal_target is not None:
-                player.position = cell.portal_target
+            raise Exception("elif ctype == CellType.PORTAL")
 
         elif ctype == CellType.CHEST_BAD:
             card = self.state.deck_events.draw(1)[0]
