@@ -673,26 +673,24 @@ class GameEngine:
 
         if target_self:
             steps = coins_spent * abs(multiplier)
-            self.move_player(player, steps)
-
             self.logger.log_event(player.uid, "SLIDER_EFFECT_SELF", {
                 "effect": effect_id,
                 "coins_spent": coins_spent,
                 "steps": steps
             })
+            self.move_player(player, steps)
         else:
             # Для эффекта откидывания других игроков назад
             steps = coins_spent
-            for p in self.state.players:
-                if p.uid != player.uid:
-                    self.move_player(p, abs(steps), is_forward=False)
-
             self.logger.log_event(player.uid, "SLIDER_EFFECT_OTHERS", {
                 "effect": effect_id,
                 "coins_spent": coins_spent,
                 "steps_back": steps,
                 "targets": [p.name for p in self.state.players if p.uid != player.uid]
             })
+            for p in self.state.players:
+                if p.uid != player.uid:
+                    self.move_player(p, abs(steps), is_forward=False)
 
     def resolve_inventory_keep(self, player: Player, keep_idx: int):
         kept = player.hand[keep_idx]

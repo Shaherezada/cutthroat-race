@@ -82,8 +82,5 @@ class GameState:
         self.current_player.reset_turn_flags()
 
     def add_rule(self, card: RuleCard):
-        """Добавляет правило в Та-Дам, вытесняя старое"""
-        if len(self.active_rules) == TA_DAM_QUEUE_SIZE:
-            removed = self.active_rules.popleft()  # Удаляем старое (FIFO)
-            # Тут можно добавить логи в будущем
-        self.active_rules.append(card)
+        """Добавляет правило в Та-Дам слева, сдвигая остальные вправо"""
+        self.active_rules.appendleft(card)

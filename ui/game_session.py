@@ -150,6 +150,9 @@ class GameSession:
         self.ui.active_dialog = Dialog(f"{ep}: Выбери цель", opts)
 
     def _open_mine_placement(self, _ev, ep):
+        if ep.coins <= 0:
+            self.engine.pending_events.pop(0)
+            return
         self.ui.mine_placement_mode = True
         self.ui.mine_placement_player = ep
         self.engine.pending_events.pop(0)
