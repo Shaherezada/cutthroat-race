@@ -260,6 +260,9 @@ class EffectResolver:
                          if p.uid != src.uid and p.position > src.position]
             if not opponents:
                 return
+        elif effect_id == "attack_voodoo":
+            opponents = [p for p in self.engine.state.players
+                         if p.uid != src.uid and p.position > src.position]
         else:
             opponents = [p for p in self.engine.state.players if p.uid != src.uid]
 

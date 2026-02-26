@@ -93,7 +93,7 @@ class GameEngine:
                 if any(not o.is_finished and o.position > 0 for o in opponents):
                     return True
             elif eid == "attack_voodoo":
-                if any(not o.is_finished for o in opponents):
+                if any(not o.is_finished and o.position > player.position for o in opponents):
                     return True
             else:
                 return True
@@ -722,7 +722,7 @@ class GameEngine:
             if not (target and not target.is_finished and target.position > 0):
                 return False
         elif eid == "attack_voodoo":
-            if not (target and not target.is_finished):
+            if not (target and not target.is_finished and target.position > player.position):
                 return False
 
         if not player.pay(card.use_cost): return False
@@ -731,6 +731,9 @@ class GameEngine:
             self.move_player(target, card.value, is_forward=False)
         elif eid == "attack_voodoo" and target:
             bad_card = self.state.deck_events.draw(1)[0]
+            self.logger.log_event(player.uid, "CARD_USE", {
+                "card": "вуду", "target": target.name, "card_drawn": bad_card.bad_side.name
+            })
             self.pending_events.append(GameEvent(
                 type="EVENT_CARD",
                 player=target,
