@@ -136,11 +136,10 @@ class GameEngine:
                 "steps": actual_steps, "to": target_pos
             })
             cell = self.board.get_cell(player.position)
-            if apply_effects:
-                if cell.type == CellType.PORTAL and cell.portal_target is not None:
-                    player.position = cell.portal_target
-                else:
-                    self._handle_landing(player)
+            if cell.type == CellType.PORTAL and cell.portal_target is not None:
+                player.position = cell.portal_target
+            elif apply_effects:
+                self._handle_landing(player)
 
     def _handle_landing(self, player: Player):
         cell = self.board.get_cell(player.position)
@@ -732,7 +731,8 @@ class GameEngine:
             steps = 1 if len(self.state.players) <= 3 else 2
             self.move_player(target, steps, is_forward=False)
         elif eid == "attack_hook" and target:
-            player.position = target.position
+            steps = target.position - player.position
+            self.move_player(player, steps, is_own_move=True)
         elif eid == "move_harpoon" and target:
             target.position = player.position
 

@@ -92,19 +92,21 @@ class EffectResolver:
                 src.add_coins(val)
 
     def _others_move_forward(self, src, val, _tgt):
+        current_uid = self.engine.state.current_player.uid
         for p in self.engine.state.players:
             if p.uid != src.uid:
-                self.engine.move_player(p, val, apply_effects=False)
+                self.engine.move_player(p, val, apply_effects=(p.uid == current_uid))
 
     def _all_lose_coins_global(self, _src, val, _tgt):
         for p in self.engine.state.players:
             p.pay(min(p.coins, val))
 
     def _others_gain_coins_move(self, src, val, _tgt):
+        current_uid = self.engine.state.current_player.uid
         for p in self.engine.state.players:
             if p.uid != src.uid:
                 p.add_coins(val)
-                self.engine.move_player(p, val, apply_effects=False)
+                self.engine.move_player(p, val, apply_effects=(p.uid == current_uid))
 
     def _steal_2_from_all(self, src, val, _tgt):
         for p in self.engine.state.players:
@@ -305,7 +307,8 @@ class EffectResolver:
 
     def _t_roll_push_enemy(self, src, tgt, _val):
         roll = random.randint(1, 6)
-        self.engine.move_player(tgt, roll, apply_effects=False)
+        current_uid = self.engine.state.current_player.uid
+        self.engine.move_player(tgt, roll, apply_effects=(tgt.uid == current_uid))
         self.engine.logger.log_event(src.uid, "EFFECT_PUSH", {"target": tgt.name, "roll": roll})
 
     def _t_give_coins_to_target(self, src, tgt, val):
