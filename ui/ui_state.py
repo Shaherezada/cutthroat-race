@@ -22,6 +22,8 @@ class UIState:
     sidebar_card_rects: list = field(default_factory=list)
     pending_card_use_idx: Optional[int] = None
     end_turn_btn_rect: Optional[pygame.Rect] = None
+    showing_event_card_sidebar: bool = False
+    event_card_ok_rect: Optional[pygame.Rect] = None
 
     # Та-Дам
     pending_tadam_rule: Optional[RuleCard] = None
@@ -43,6 +45,7 @@ class UIState:
         return bool(
             self.active_dialog or self.active_slider
             or self.viewing_card_sprite_id or self.mine_placement_mode
+            or self.showing_event_card_sidebar
         )
 
     def clear_dialog(self):

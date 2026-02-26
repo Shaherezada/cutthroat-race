@@ -24,9 +24,36 @@ class Renderer:
         ]
 
     def _load_sprites(self):
-        self._load_rule_sprites()
+        self._load_event_sprites()
         self._load_shop_sprites()
+        self._load_rule_sprites()
         self._load_coin_sprites()
+
+    def _load_event_sprites(self):
+        self.event_sprites = {"good": {}, "bad": {}}
+        w = 240
+        for kind in ("good", "bad"):
+            for i in range(1, 19):
+                path = f'assets/event_cards/{kind}/{i}.png'
+                if os.path.exists(path):
+                    raw = pygame.image.load(path).convert_alpha()
+                    ow, oh = raw.get_size()
+                    h = int(w * oh / ow)
+                    scaled = pygame.transform.smoothscale(raw, (w, h))
+                    # Берём только верхнюю половину
+                    half = h // 2
+                    cropped = pygame.Surface((w, half), pygame.SRCALPHA)
+                    cropped.blit(scaled, (0, 0), (0, 0, w, half))
+                    self.event_sprites[kind][i] = cropped
+
+    def _load_shop_sprites(self):
+        self.shop_sprites = {}
+        size = tuple([round(dim * 0.41) for dim in (738, 1039)])
+        for i in range(1, 11):
+            path = f'assets/shop_cards/{i}.png'
+            if os.path.exists(path):
+                raw = pygame.image.load(path).convert_alpha()
+                self.shop_sprites[i] = pygame.transform.smoothscale(raw, size)
 
     def _load_rule_sprites(self):
         self.rule_sprites_small = {}
@@ -41,15 +68,6 @@ class Renderer:
                 raw = pygame.image.load(path).convert_alpha()
                 self.rule_sprites_small[i] = pygame.transform.smoothscale(raw, small_size)
                 self.rule_sprites_large[i] = pygame.transform.smoothscale(raw, large_size)
-
-    def _load_shop_sprites(self):
-        self.shop_sprites = {}
-        size = tuple([round(dim * 0.41) for dim in (738, 1039)])
-        for i in range(1, 11):
-            path = f'assets/shop_cards/{i}.png'
-            if os.path.exists(path):
-                raw = pygame.image.load(path).convert_alpha()
-                self.shop_sprites[i] = pygame.transform.smoothscale(raw, size)
 
     def _load_coin_sprites(self):
         self.coin_sprites = {}
@@ -202,6 +220,39 @@ class Renderer:
                 self.screen.blit(sprite, (x + col * (size + gap), y + row * (size + gap)))
 
         return rows * (size + gap) + 2
+
+    def draw_event_card_sidebar(self, card, is_good: bool, mouse_pos: tuple) -> pygame.Rect:
+        """Рисует карту события в нижней части сайдбара. Возвращает rect кнопки OK."""
+        kind = "good" if is_good else "bad"
+        sprite_idx = int(card.uid.split('_')[1]) + 1
+        sprites = self.event_sprites.get(kind, {})
+        sprite = sprites.get(sprite_idx)
+
+        sx = self.view_cfg.target_size
+        card_w = 270
+
+        if sprite:
+            scaled = pygame.transform.smoothscale(sprite,
+                                                  (card_w, int(sprite.get_height() * card_w / sprite.get_width())))
+            card_x = sx + (300 - scaled.get_width()) // 2
+            card_y = self.view_cfg.target_size - scaled.get_height() - 150
+            self.screen.blit(scaled, (card_x, card_y))
+            btn_y = card_y + scaled.get_height() + 8
+        else:
+            side = card.good_side if is_good else card.bad_side
+            label = self.font.render(side.name.upper(), True, (255, 215, 0))
+            card_y = self.view_cfg.target_size - 120
+            self.screen.blit(label, (sx + 15, card_y))
+            btn_y = card_y + 40
+
+        btn_rect = pygame.Rect(sx + 50, btn_y, 200, 44)
+        is_hover = btn_rect.collidepoint(mouse_pos)
+        pygame.draw.rect(self.screen, (60, 160, 60) if is_hover else (40, 120, 40), btn_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (200, 200, 200), btn_rect, 2, border_radius=8)
+        txt = self.font.render("ОК", True, (255, 255, 255))
+        self.screen.blit(txt, (btn_rect.centerx - txt.get_width() // 2,
+                               btn_rect.centery - txt.get_height() // 2))
+        return btn_rect
 
     def draw_large_rule_card(self, sprite_id: int, mouse_pos: tuple):
         """Рисует крупную карту в центре экрана с затемнением фона"""

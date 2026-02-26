@@ -94,9 +94,7 @@ class GameSession:
         ui = self.ui
         ui.pending_event_card = ev.data["card"]
         ui.pending_event_is_good = ev.data["is_good"]
-        side = ui.pending_event_card.good_side if ui.pending_event_is_good else ui.pending_event_card.bad_side
-        title = "Карта Хорошо" if ui.pending_event_is_good else "Карта Плохо"
-        ui.active_dialog = Dialog(f"{ep.name}: {title}: {side.name.upper()}", [side.description, "ОК"])
+        ui.showing_event_card_sidebar = True
 
     def _open_finish_roll(self, _ev, ep):
         # Если денег нет даже на минимальный бонус - бросаем сразу
@@ -184,6 +182,10 @@ class GameSession:
                 self._handle_card_view(event)
                 continue
 
+            if self.ui.showing_event_card_sidebar:
+                self._handle_event_card_sidebar(event)
+                continue
+
             ev = self.engine.pending_events[0] if self.engine.pending_events else None
             if ev and ev.type in ("SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD", "INVENTORY_KEEP"):
                 self._handle_card_selection(event, mouse_pos, ev)
@@ -229,6 +231,18 @@ class GameSession:
                 eng.pending_events.pop(0)
                 ui.pending_tadam_rule = None
             ui.viewing_card_sprite_id = None
+
+    def _handle_event_card_sidebar(self, event):
+        ui, eng = self.ui, self.engine
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        if ui.event_card_ok_rect and ui.event_card_ok_rect.collidepoint(event.pos):
+            ev = eng.pending_events[0]
+            eng.resolve_event_card(ev.player, ui.pending_event_card, ui.pending_event_is_good)
+            eng.pending_events.pop(0)
+            ui.pending_event_card = None
+            ui.showing_event_card_sidebar = False
+            ui.event_card_ok_rect = None
 
     def _handle_card_selection(self, event, mouse_pos, ev):
         ui, eng = self.ui, self.engine
@@ -295,9 +309,6 @@ class GameSession:
         if "Выбери ход" in title:
             eng.move_player(self.p, ui.pending_move_options[i], is_own_move=True)
             ui.clear_dialog()
-        elif "Карта" in title:
-            eng.resolve_event_card(ep, ui.pending_event_card, ui.pending_event_is_good)
-            ui.clear_dialog(); eng.pending_events.pop(0)
         elif "противника" in title:
             eng.resolve_duel_opponent(self.p, ev.data["opponents"][i])
             ui.clear_dialog(); eng.pending_events.pop(0)
@@ -457,3 +468,7 @@ class GameSession:
 
         if ui.mine_placement_mode and ui.mine_placement_player:
             r.draw_mine_placement_button(ui.mine_placement_player.coins, mouse_pos)
+
+        if ui.showing_event_card_sidebar and ui.pending_event_card:
+            ui.event_card_ok_rect = r.draw_event_card_sidebar(
+                ui.pending_event_card, ui.pending_event_is_good, mouse_pos)
