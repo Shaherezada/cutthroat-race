@@ -63,6 +63,7 @@ class GameSession:
             "SLIDER_INPUT":           self._open_slider,
             "SHOP":                   self._open_shop,
             "SHOP_FREE":              self._open_shop_free,
+            "SHOP_GIVE":              self._resolve_shop_give,
             "EVENT_CARD":             self._open_event_card,
             "FINISH_ROLL":            self._open_finish_roll,
             "RED_CHOICE":             self._open_red_choice,
@@ -89,6 +90,12 @@ class GameSession:
 
     def _open_shop_free(self, ev, _ep):
         self.ui.pending_shop_cards = ev.data["cards"]
+
+    def _resolve_shop_give(self, ev, ep):
+        card = ev.data["card"]
+        ep.add_card(card)
+        self.engine.logger.log_event(ep.uid, "SHOP_FREE", {"card": card.name})
+        self.engine.pending_events.pop(0)
 
     def _open_event_card(self, ev, ep):
         ui = self.ui
@@ -238,8 +245,19 @@ class GameSession:
             return
         if ui.event_card_ok_rect and ui.event_card_ok_rect.collidepoint(event.pos):
             ev = eng.pending_events[0]
+
+            # Запоминаем сколько событий было ПОСЛЕ текущего
+            events_after = len(eng.pending_events) - 1
+
             eng.resolve_event_card(ev.player, ui.pending_event_card, ui.pending_event_is_good)
             eng.pending_events.pop(0)
+
+            # Если эффект карты породил новые события — вытаскиваем их в начало очереди
+            if len(eng.pending_events) > events_after:
+                newly_added = eng.pending_events[events_after:]
+                pre_planned = eng.pending_events[:events_after]
+                eng.pending_events = newly_added + pre_planned
+
             ui.pending_event_card = None
             ui.showing_event_card_sidebar = False
             ui.event_card_ok_rect = None

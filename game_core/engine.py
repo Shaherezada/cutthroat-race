@@ -418,26 +418,35 @@ class GameEngine:
             self.logger.log_event(player.uid, "FORTUNE_CUBE", {"rolls": rolls, "total": total})
             self.move_player(player, total)
 
+
         elif ctype == CellType.FORTUNATE_SETUP:
+            # 1. Хорошо
             good_card = self.state.deck_events.draw(1)[0]
             self.pending_events.append(GameEvent(
-                type="EVENT_CARD",
-                player=player,
+                type="EVENT_CARD", player=player,
                 data={"card": good_card, "is_good": True}
             ))
 
+            # 2. Лавка Джо — берём 1 карту, выдаём через очередь
             shop_card = self.state.deck_shop.draw(1)[0]
-            player.add_card(shop_card)
+            self.pending_events.append(GameEvent(
+                type="SHOP_GIVE", player=player,
+                data={"card": shop_card}
+            ))
 
+            # 3. Та-Дам — показываем через очередь
             new_rule = self.state.deck_tadam.draw(1)[0]
-            self.state.add_rule(new_rule)
+            self.pending_events.append(GameEvent(
+                type="TADAM_SHOW", player=player,
+                data={"rule": new_rule}
+            ))
 
+            # 4. Плохо для остальных — только после всего выше
             for p in self.state.players:
                 if p.uid != player.uid:
                     bad_card = self.state.deck_events.draw(1)[0]
                     self.pending_events.append(GameEvent(
-                        type="EVENT_CARD",
-                        player=p,
+                        type="EVENT_CARD", player=p,
                         data={"card": bad_card, "is_good": False}
                     ))
 
@@ -737,7 +746,7 @@ class GameEngine:
             self.move_player(target, steps, is_forward=False)
         elif eid == "attack_hook" and target:
             steps = target.position - player.position
-            self.move_player(player, steps, is_own_move=True)
+            self.move_player(player, steps)
         elif eid == "move_harpoon" and target:
             target.position = player.position
 
