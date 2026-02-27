@@ -36,8 +36,8 @@ class Player:
     def add_coins(self, amount: int):
         self.coins = max(0, self.coins + amount)  # Не уходим в минус при штрафах, если правила не говорят обратного
 
-    def add_card(self, card: Card) -> bool:
-        """Возвращает False, если рука полна (нужно сбросить другую)"""
+    def add_card(self, card: ShopCard) -> bool:
+        """Возвращает False, если рука полна (нужно сбросить что-то)"""
         if len(self.hand) >= MAX_HAND_SIZE:
             return False
         self.hand.append(card)
@@ -60,8 +60,8 @@ class Player:
         self.end_checks_done = False
 
 class GameState:
-    def __init__(self, player_count=2):
-        self.players = [Player(i, f"Игрок {i+1}") for i in range(player_count)]
+    def __init__(self, players: List[Player]):
+        self.players = players
         self.current_player_idx = 0
 
         # Колоды

@@ -16,9 +16,9 @@ class GameEvent:
     data: dict = None
 
 class GameEngine:
-    def __init__(self, logger: GameLogger, player_count: int = 2):
+    def __init__(self, logger: GameLogger, players: List[Player]):
         self.board = Board()
-        self.state = GameState(player_count)
+        self.state = GameState(players)
         self.logger = logger  # Внедряем логгер
         self.is_game_over = False
         self.winner: Optional[Player] = None
@@ -726,6 +726,9 @@ class GameEngine:
         if not player.pay(card.use_cost): return False
 
         if eid == "attack_grenade" and target:
+            self.logger.log_event(player.uid, "CARD_USE", {
+                "card": card.name, "target": target.name, "steps_back": card.value
+            })
             self.move_player(target, card.value, is_forward=False)
         elif eid == "attack_voodoo" and target:
             bad_card = self.state.deck_events.draw(1)[0]
@@ -744,11 +747,21 @@ class GameEngine:
                 player.has_moved = True
         elif eid == "attack_hand_fate" and target:
             steps = 1 if len(self.state.players) <= 3 else 2
+            self.logger.log_event(player.uid, "CARD_USE", {
+                "card": card.name, "target": target.name, "steps_back": steps
+            })
             self.move_player(target, steps, is_forward=False)
         elif eid == "attack_hook" and target:
             steps = target.position - player.position
+            self.logger.log_event(player.uid, "CARD_USE", {
+                "card": card.name, "target": target.name, "steps_forward": steps
+            })
             self.move_player(player, steps)
         elif eid == "move_harpoon" and target:
+            self.logger.log_event(player.uid, "CARD_USE", {
+                "card": card.name, "target": target.name,
+                "target_moved_to": player.position
+            })
             target.position = player.position
 
         player.mark_card_used(card_idx)

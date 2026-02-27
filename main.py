@@ -1,7 +1,30 @@
 import pygame
 import sys
+from game_core.ai import RandomAIPlayer
 from game_core.logger import GameLogger
+from game_core.state import Player
 from ui.game_session import GameSession, WINDOW_SIZE
+
+# ------------------------------------------------------------------
+# Конфигурация игроков: "human" или "ai"
+# Порядок = порядок ходов. Минимум 2 игрока.
+# ------------------------------------------------------------------
+PLAYER_CONFIG = [
+    "human",
+    "ai",
+]
+
+
+def create_players(config: list) -> list:
+    players = []
+    for i, kind in enumerate(config):
+        name = f"Игрок {i + 1}"
+        if kind == "ai":
+            name += " (AI)"
+            players.append(RandomAIPlayer(i, name))
+        else:
+            players.append(Player(i, name))
+    return players
 
 
 def main():
@@ -12,7 +35,8 @@ def main():
     start_ticks = pygame.time.get_ticks()
 
     logger = GameLogger()
-    session = GameSession(screen, logger, player_count=2)
+    players = create_players(PLAYER_CONFIG)
+    session = GameSession(screen, logger, players=players)
     turn_count = 1
     running = True
 

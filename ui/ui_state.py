@@ -24,6 +24,7 @@ class UIState:
     end_turn_btn_rect: Optional[pygame.Rect] = None
     showing_event_card_sidebar: bool = False
     event_card_ok_rect: Optional[pygame.Rect] = None
+    event_card_auto_close_at: Optional[int] = None  # ms, pygame.time.get_ticks()
 
     # Та-Дам
     pending_tadam_rule: Optional[RuleCard] = None

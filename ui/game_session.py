@@ -1,4 +1,5 @@
 import pygame
+from game_core.ai import RandomAIPlayer
 from game_core.engine import GameEngine, GameEvent
 from game_core.logger import GameLogger
 from game_core.state import Player
@@ -6,10 +7,11 @@ from ui.renderer import Renderer
 from ui.view_config import ViewConfig
 from ui.ui_state import UIState
 from ui.components import Dialog, SliderDialog
-from typing import Protocol
+from typing import Protocol, List
 
 
 WINDOW_SIZE = 1000
+AI_CARD_SHOW_MS = 1500
 
 
 class _EventHandler(Protocol):
@@ -17,9 +19,9 @@ class _EventHandler(Protocol):
 
 
 class GameSession:
-    def __init__(self, screen: pygame.Surface, logger: GameLogger, player_count: int = 2):
+    def __init__(self, screen: pygame.Surface, logger: GameLogger, players: List[Player]):
         self.logger = logger
-        self.engine = GameEngine(logger, player_count)
+        self.engine = GameEngine(logger, players)
         self.ui = UIState()
 
         view_cfg = ViewConfig("ui/coords.json", target_size=WINDOW_SIZE)
@@ -37,15 +39,85 @@ class GameSession:
     def p_idx(self):
         return self.engine.state.current_player_idx
 
+    def _is_ai(self, player: Player = None) -> bool:
+        return isinstance(player or self.p, RandomAIPlayer)
+
     def tick(self, events: list, mouse_pos: tuple, elapsed_seconds: int, turn_count: int):
-        """Один кадр: события движка → ввод → отрисовка"""
         self._process_pending_events()
+
+        # Авто-закрытие карты события по таймеру (AI-игрок)
+        ui = self.ui
+        if (ui.showing_event_card_sidebar
+                and ui.event_card_auto_close_at is not None
+                and pygame.time.get_ticks() >= ui.event_card_auto_close_at):
+            ev = self.engine.pending_events[0]
+            self.engine.resolve_event_card(ev.player, ui.pending_event_card, ui.pending_event_is_good)
+            self.engine.pending_events.pop(0)
+            ui.pending_event_card = None
+            ui.showing_event_card_sidebar = False
+            ui.event_card_ok_rect = None
+            ui.event_card_auto_close_at = None
 
         if not self.ui.is_busy and not self.engine.pending_events:
             self.engine.try_advance_turn(self.p)
 
+        if self._is_ai() and not self.ui.is_busy:
+            self._ai_tick()
+
         self.handle_input(events, mouse_pos)
         self.draw(mouse_pos, elapsed_seconds, turn_count)
+
+    # ------------------------------------------------------------------
+    # AI тик — принимает решения вместо UI
+    # ------------------------------------------------------------------
+
+    def _ai_tick(self):
+        p = self.p
+        eng = self.engine
+        ai: RandomAIPlayer = p  # type: ignore
+
+        if self.ui.is_busy:
+            return
+
+        # Ход не начат - решаем: карта или кубики
+        if not p.has_moved and p.turn_checks_done and not eng.pending_events:
+            opponents = [o for o in eng.state.players if o.uid != p.uid]
+            decision = ai.decide_pre_roll_action(opponents)
+
+            if decision[0] == "use":
+                _, card_idx, target_idx = decision
+                eng.use_card_from_hand(self.p_idx, card_idx, target_idx=target_idx)
+            else:
+                if p.is_finished:
+                    eng.pending_events.append(GameEvent(type="FINISH_ROLL", player=p, data={}))
+                    p.has_moved = True
+                else:
+                    rolls = eng.get_roll(p)
+                    options = eng.get_move_options(p, rolls)
+                    chosen = options[ai.decide_slider(len(options) - 1)]
+                    eng.move_player(p, chosen, is_own_move=True)
+            return
+
+        # После хода - карты или завершение
+        if p.has_moved and not eng.pending_events:
+            if eng.can_player_do_actions(p):
+                opponents = [o for o in eng.state.players if o.uid != p.uid]
+                decision = ai.decide_pre_roll_action(opponents)
+                if decision[0] == "use":
+                    _, card_idx, target_idx = decision
+                    eng.use_card_from_hand(self.p_idx, card_idx, target_idx=target_idx)
+                    return
+                # "roll" здесь означает "не использовать карты, завершить ход"
+
+            if not p.end_checks_done:
+                eng.end_turn_checks(p)
+                p.end_checks_done = True
+            if not eng.pending_events:
+                if p.has_extra_turn:
+                    p.has_extra_turn = False
+                    p.reset_turn_flags()
+                else:
+                    eng.state.next_turn(self.logger)
 
     # ------------------------------------------------------------------
     # Обработка очереди событий движка
@@ -81,14 +153,38 @@ class GameSession:
         if handler:
             handler(ev, ep)
 
-    def _open_slider(self, ev, _ep):
+    # ------------------------------------------------------------------
+    # Открытие диалогов / авто-решение для AI
+    # ------------------------------------------------------------------
+
+    def _open_slider(self, ev, ep):
+        if self._is_ai(ep):
+            d = ev.data
+            value = ep.decide_slider(d["max_value"])
+            self.engine.resolve_slider_input(ep, value, {
+                "effect_id": d["effect_id"],
+                "multiplier": d["multiplier"],
+                "target_self": d.get("target_self", True)
+            })
+            self.engine.pending_events.pop(0)
+            return
         d = ev.data
         self.ui.active_slider = SliderDialog(d["title"], d["description"], d["max_value"], d["multiplier"])
 
-    def _open_shop(self, ev, _ep):
+    def _open_shop(self, ev, ep):
+        if self._is_ai(ep):
+            choice = ep.decide_shop()
+            self.engine.resolve_shop_choice(ep, ev.data["cards"], choice)
+            self.engine.pending_events.pop(0)
+            return
         self.ui.pending_shop_cards = ev.data["cards"]
 
-    def _open_shop_free(self, ev, _ep):
+    def _open_shop_free(self, ev, ep):
+        if self._is_ai(ep):
+            choice = ep.decide_shop_free()
+            self.engine.resolve_shop_free_choice(ep, ev.data["cards"], choice)
+            self.engine.pending_events.pop(0)
+            return
         self.ui.pending_shop_cards = ev.data["cards"]
 
     def _resolve_shop_give(self, ev, ep):
@@ -102,12 +198,24 @@ class GameSession:
         ui.pending_event_card = ev.data["card"]
         ui.pending_event_is_good = ev.data["is_good"]
         ui.showing_event_card_sidebar = True
+        if self._is_ai(ep):
+            ui.event_card_auto_close_at = pygame.time.get_ticks() + AI_CARD_SHOW_MS
+        else:
+            ui.event_card_auto_close_at = None
 
-    def _open_finish_roll(self, _ev, ep):
-        # Если денег нет даже на минимальный бонус - бросаем сразу
+    def _open_finish_roll(self, ev, ep):
+        if self._is_ai(ep):
+            choice = ep.decide_finish_roll()
+            bonus_map = {0: 0, 1: 5, 2: 10}
+            roll, bonus, total, success = self.engine.attempt_finish(ep, bonus_map[choice])
+            self.engine.pending_events.pop(0)
+            self.logger.log_event(ep.uid, "AI_FINISH_ROLL", {
+                "roll": roll, "bonus": bonus, "total": total, "success": success
+            })
+            return
         if ep.coins < 5:
             roll, bonus, total, success = self.engine.attempt_finish(ep, 0)
-            self.engine.pending_events.pop(0)  # Убираем текущее событие вызова
+            self.engine.pending_events.pop(0)
             result_text = f"Выпало {roll} = {total}"
             result_text += " — ПОБЕДА!" if success else " — Не хватило... (нужно 6+)"
             self.ui.active_dialog = Dialog(result_text, ["ОК"])
@@ -117,19 +225,44 @@ class GameSession:
             if ep.coins >= 10: opts.append("Сбросить 10 монет (+2 к броску)")
             self.ui.active_dialog = Dialog(f"{ep.name}: Финиш-сейф! Нужно 6+", opts)
 
-    def _open_red_choice(self, _ev, ep):
+    def _open_red_choice(self, ev, ep):
+        if self._is_ai(ep):
+            choice = ep.decide_red_choice()
+            if choice == 0:
+                ep.pay(3)
+            else:
+                self.engine.move_player(ep, 3, is_forward=False)
+            self.engine.pending_events.pop(0)
+            return
         self.ui.active_dialog = Dialog(f"{ep.name}: Красная западня",
                                        ["Потерять 3 монеты", "Назад на 3 клетки"])
 
-    def _open_tadam(self, ev, _ep):
+    def _open_tadam(self, ev, ep):
+        if self._is_ai(ep):
+            # AI мгновенно принимает новое правило
+            self.engine.resolve_tadam_choice(ev.data["rule"])
+            self.engine.pending_events.pop(0)
+            return
         self.ui.pending_tadam_rule = ev.data["rule"]
         self.ui.viewing_card_sprite_id = self.ui.pending_tadam_rule.sprite_id
 
     def _open_duel_choose_opponent(self, ev, ep):
+        if self._is_ai(ep):
+            opponents = ev.data["opponents"]
+            idx = ep.decide_duel_opponent(opponents)
+            self.engine.resolve_duel_opponent(ep, opponents[idx])
+            self.engine.pending_events.pop(0)
+            return
         opts = [f'Драться с {o.name}' for o in ev.data["opponents"]]
         self.ui.active_dialog = Dialog(f"{ep.name}: Выбери противника для схватки", opts)
 
     def _open_duel_reward(self, ev, ep):
+        if self._is_ai(ep):
+            loser = ev.data["loser"]
+            reward = ep.decide_duel_reward(bool(loser.hand))
+            self.engine.resolve_duel_reward_choice(ep, loser, reward)
+            self.engine.pending_events.pop(0)
+            return
         self.ui.duel_defender = ev.data["loser"]
         opts = ["Забрать 10 монет", "Откинуть на 10 клеток"]
         if self.ui.duel_defender.hand:
@@ -138,6 +271,11 @@ class GameSession:
             f"{ep.name}: Победа! ({ev.data['atk_roll']} vs {ev.data['def_roll']})", opts)
 
     def _open_tornado(self, ev, ep):
+        if self._is_ai(ep):
+            choice = ep.decide_tornado()
+            self.engine.resolve_tornado_choice(ep, choice, ev.data["target_pos"])
+            self.engine.pending_events.pop(0)
+            return
         self.ui.pending_tornado_target = ev.data["target_pos"]
         if ep.coins >= 10:
             self.ui.active_dialog = Dialog(f"Смерч: {ep.name}", ["Откупиться (10 монет)", "Лететь к Смерчу!"])
@@ -146,21 +284,54 @@ class GameSession:
             self.engine.pending_events.pop(0)
 
     def _open_choose_target(self, ev, ep):
+        if self._is_ai(ep):
+            opponents = ev.data["opponents"]
+            idx = ep.decide_target(opponents)
+            self.engine.resolve_target_choice(ep, opponents[idx].uid,
+                                              ev.data["effect_id"], ev.data["value"])
+            self.engine.pending_events.pop(0)
+            return
         opts = [o.name for o in ev.data["opponents"]]
         self.ui.active_dialog = Dialog(f"{ep}: Выбери цель", opts)
 
-    def _open_mine_placement(self, _ev, ep):
-        if ep.coins <= 0:
+    def _open_mine_placement(self, ev, ep):
+        if self._is_ai(ep):
+            all_cell_ids = [cid for cid in self.engine.board.cells.keys()]
+            enemy_positions = [o.position for o in self.engine.state.players if o.uid != ep.uid]
+            chosen_cells = ep.decide_mine_placement(all_cell_ids, enemy_positions)
+            for cell_id in chosen_cells:
+                if ep.coins > 0 and cell_id not in self.engine.placed_mines:
+                    ep.pay(1)
+                    self.engine.placed_mines[cell_id] = ep.uid
+                    self.logger.log_event(ep.uid, "MINE_PLACED", {"cell": cell_id})
             self.engine.pending_events.pop(0)
             return
         self.ui.mine_placement_mode = True
         self.ui.mine_placement_player = ep
         self.engine.pending_events.pop(0)
 
-    def _open_inventory_keep(self, ev, _ep):
+    def _open_inventory_keep(self, ev, ep):
+        if self._is_ai(ep):
+            idx = ep.decide_inventory_keep(ev.data["cards"])
+            self.engine.resolve_inventory_keep(ep, idx)
+            self.engine.pending_events.pop(0)
+            return
         self.ui.pending_shop_cards = ev.data["cards"]
 
     def _open_tax_shop_card(self, ev, ep):
+        if self._is_ai(ep):
+            card_idx = ev.data["card_idx"]
+            cost = ev.data["cost"]
+            # Пока в руке есть карты для налога
+            while card_idx < len(ep.hand):
+                card = ep.hand[card_idx]
+                choice = ep.decide_tax_card(ep.can_afford(cost))
+                if choice == 0 and ep.pay(cost):
+                    card_idx += 1
+                else:
+                    self.engine.state.deck_shop.discard(ep.remove_card(card_idx))
+            self.engine.pending_events.pop(0)
+            return
         card_idx = ev.data["card_idx"]
         cost = ev.data["cost"]
         if card_idx >= len(ep.hand):
@@ -172,17 +343,33 @@ class GameSession:
             [f"Заплатить {cost} монет (есть: {ep.coins})", "Сбрось карту"]
         )
 
-    def _open_choose_card_to_discard(self, ev, _ep):
+    def _open_choose_card_to_discard(self, ev, ep):
+        if self._is_ai(ep):
+            idx = ep.decide_card_to_discard(ev.data["cards"])
+            self.engine.resolve_discard_enemy_card(ep, ev.data["target"], idx,
+                                                   steal=ev.data.get("steal", False))
+            self.engine.pending_events.pop(0)
+            return
         self.ui.pending_shop_cards = ev.data["cards"]
 
     # ------------------------------------------------------------------
-    # Обработка ввода
+    # Обработка ввода (только для людей)
     # ------------------------------------------------------------------
 
     def handle_input(self, events: list, mouse_pos: tuple):
         for event in events:
             if event.type == pygame.QUIT:
                 return False
+
+            if self.ui.showing_event_card_sidebar:
+                ev = self.engine.pending_events[0] if self.engine.pending_events else None
+                card_owner_is_ai = ev is not None and self._is_ai(ev.player)
+                if not card_owner_is_ai:
+                    self._handle_event_card_sidebar(event)
+                continue  # всё остальное пока карта на экране не нужно
+
+            if self._is_ai():
+                continue
 
             if self.ui.active_slider:
                 self._handle_slider(event, mouse_pos)
