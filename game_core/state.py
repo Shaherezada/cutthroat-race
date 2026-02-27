@@ -43,7 +43,7 @@ class Player:
         self.hand.append(card)
         return True
 
-    def remove_card(self, index: int) -> Card:
+    def remove_card(self, index: int) -> ShopCard:
         """Удаляет карту (при сбросе лишней или продаже)"""
         if 0 <= index < len(self.hand):
             return self.hand.pop(index)

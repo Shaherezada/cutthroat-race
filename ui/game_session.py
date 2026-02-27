@@ -31,6 +31,10 @@ class GameSession:
         self.view_cfg = view_cfg
         self.screen = screen
 
+        for p in players:
+            if isinstance(p, RandomAIPlayer):
+                p.logger = logger
+
     @property
     def p(self):
         return self.engine.state.current_player
@@ -94,7 +98,7 @@ class GameSession:
                 else:
                     rolls = eng.get_roll(p)
                     options = eng.get_move_options(p, rolls)
-                    chosen = options[ai.decide_slider(len(options) - 1)]
+                    chosen = options[ai.decide_move_option(options)]
                     eng.move_player(p, chosen, is_own_move=True)
             return
 

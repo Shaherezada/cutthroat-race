@@ -6,7 +6,7 @@ from game_core.board import Board
 from game_core.effects import EffectResolver
 from game_core.logger import GameLogger
 from game_core.state import GameState, Player
-from game_core.cards import Card, ShopCard, EventCard, RuleCard
+from game_core.cards import ShopCard, EventCard, RuleCard
 
 @dataclass
 class GameEvent:
@@ -44,34 +44,43 @@ class GameEngine:
         if any(r == 6 for r in rolls):
             for rule in self.state.active_rules:
                 if rule.effect_id == "rule_six_skip":
-                    player.skip_next_turn = True
-                    self.logger.log_event(player.uid, "RULE_SIX_SKIP", {})
+                    cell = self.board.get_cell(player.position)
+                    if cell.type != CellType.FINISH_SAFE:
+                        player.skip_next_turn = True
+                        # Флаг ставится здесь (до движения)
+                        # Игрок бросает, видит 6, ещё ходит, а потом пропускает следующий ход.
+                        # Это корректно (?) по правилам, но логически немного неочевидно.
         return rolls
 
     def get_move_options(self, player: Player, rolls: List[int]) -> List[int]:
         """
         Принимает «сырые» броски и возвращает список доступных вариантов перемещения.
-        Учитывает зоны, Кубик удачи и пассивку Волшебный куб.
+        Учитывает зоны и волшебный куб.
+        Дедупликация вариантов перемещения происходит по конечному положению
         """
         pos = player.position
-        cell = self.board.get_cell(pos)
         has_cube = any(c.effect_id == "passive_roll_plus_1" for c in player.hand)
 
-        options = []
-
-        # Зона суммирования
         if 68 <= pos <= 97:
             s = sum(rolls)
-            return [s, s + 1] if has_cube else [s]
+            raw = [s, s + 1] if has_cube else [s]
+        else:
+            raw = []
+            for r in rolls:
+                raw.append(r)
+                if has_cube:
+                    raw.append(r + 1)
 
+        # Убираем шаги, ведущие на одну и ту же клетку
+        seen_positions = set()
         options = []
-        # Если Зона 1, rolls содержит 1 элемент. Если Зона 2 - два элемента.
-        for r in rolls:
-            options.append(r)
-            if has_cube:
-                options.append(r + 1)
+        for steps in sorted(set(raw)):
+            dest = self.board.resolve_move(pos, steps)
+            if dest not in seen_positions:
+                seen_positions.add(dest)
+                options.append(steps)
 
-        return sorted(list(set(options)))
+        return options
 
     def can_player_do_actions(self, player: Player) -> bool:
         """Проверка, есть ли у игрока доступные активные карты, которые он может оплатить"""

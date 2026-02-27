@@ -9,6 +9,15 @@ class RandomAIPlayer(Player):
 
     def __init__(self, uid: int, name: str):
         super().__init__(uid, name)
+        self.logger = None  # Устанавливается снаружи в GameSession.__init__
+
+    def _log(self, method: str, available, chosen):
+        if self.logger:
+            self.logger.log_event(self.uid, "AI_DECISION", {
+                "method": method,
+                "available": available,
+                "chosen": chosen,
+            })
 
     # ------------------------------------------------------------------
     # До броска на перемещение: использовать карту или бросать кубики?
@@ -50,13 +59,24 @@ class RandomAIPlayer(Player):
         choice = random.choice(options)
 
         if choice == "roll":
-            return ("roll",)
+            result = ("roll",)
+        else:
+            card_idx = choice
+            target_uid = self._pick_target(self.hand[card_idx].effect_id, opponents)
+            result = ("use", card_idx, target_uid)
 
-        card_idx = choice
-        card = self.hand[card_idx]
-        # Выбираем случайного подходящего врага
-        target_idx = self._pick_target(card.effect_id, opponents)
-        return "use", card_idx, target_idx
+        self._log(
+            "pre_roll_action",
+            [f"use card[{i}]={self.hand[i].name}" for i in available] + ["roll"],
+            str(result),
+        )
+        return result
+
+    def decide_move_option(self, options: List[int]) -> int:
+        """Возвращает индекс выбранного варианта перемещения."""
+        result = random.randrange(len(options))
+        self._log("move_option", options, options[result])
+        return result
 
     def _pick_target(self, effect_id: str, opponents: List[Player]) -> Optional[int]:
         if effect_id in ("attack_hook", "move_harpoon"):
@@ -82,12 +102,19 @@ class RandomAIPlayer(Player):
     def decide_shop(self) -> int:
         """0 или 1 — купить карту, 2 — пропустить."""
         if not self.can_afford(5):
-            return 2
-        return random.randint(0, 2)  # 0, 1 — купить, 2 — скип
+            result = 2
+        else:
+            result = random.randint(0, 2)
+        labels = ["buy[0]", "buy[1]", "skip"]
+        available = labels if self.can_afford(5) else ["skip"]
+        self._log("shop", available, labels[result])
+        return result
 
     def decide_shop_free(self) -> int:
         """0 или 1 — выбрать карту."""
-        return random.randint(0, 1)
+        result = random.randint(0, 1)
+        self._log("shop_free", ["card[0]", "card[1]"], f"card[{result}]")
+        return result
 
     # ------------------------------------------------------------------
     # Диалоги одиночного выбора
@@ -95,36 +122,65 @@ class RandomAIPlayer(Player):
 
     def decide_red_choice(self) -> int:
         """0 — потерять 3 монеты, 1 — назад на 3 клетки."""
-        return random.randint(0, 1)
+        result = random.randint(0, 1)
+        labels = ["lose_3_coins", "back_3_cells"]
+        self._log("red_choice", labels, labels[result])
+        return result
 
     def decide_finish_roll(self) -> int:
         """0 — без бонуса, 1 — -5 монет (+1), 2 — -10 монет (+2)."""
+        labels = ["no_bonus", "+1(cost=5coins)", "+2(cost=10coins)"]
         if self.coins >= 10:
-            return random.randint(0, 2)
-        if self.coins >= 5:
-            return random.randint(0, 1)
-        return 0
+            available = labels[:3]
+            result = random.randint(0, 2)
+        elif self.coins >= 5:
+            available = labels[:2]
+            result = random.randint(0, 1)
+        else:
+            available = labels[:1]
+            result = 0
+        self._log("finish_roll", available, labels[result])
+        return result
 
     def decide_tornado(self) -> int:
         """0 — откупиться (10 монет), 1 — лететь."""
         if self.coins >= 10:
-            return random.randint(0, 1)
-        return 1
+            result = random.randint(0, 1)
+            available = ["pay_10", "fly"]
+        else:
+            result = 1
+            available = ["fly"]
+        self._log("tornado", available, ["pay_10", "fly"][result])
+        return result
 
     def decide_duel_opponent(self, opponents: List[Player]) -> int:
         """Индекс в списке opponents."""
-        return random.randrange(len(opponents))
+        result = random.randrange(len(opponents))
+        self._log(
+            "duel_opponent",
+            [o.name for o in opponents],
+            opponents[result].name,
+        )
+        return result
 
     def decide_duel_reward(self, has_card: bool) -> str:
         """'money', 'push' или 'steal_card'."""
         choices = ["money", "push"]
         if has_card:
             choices.append("steal_card")
-        return random.choice(choices)
+        result = random.choice(choices)
+        self._log("duel_reward", choices, result)
+        return result
 
     def decide_target(self, opponents: List[Player]) -> int:
         """Индекс в списке opponents."""
-        return random.randrange(len(opponents))
+        result = random.randrange(len(opponents))
+        self._log(
+            "target",
+            [o.name for o in opponents],
+            opponents[result].name,
+        )
+        return result
 
     # ------------------------------------------------------------------
     # Слайдер
@@ -132,7 +188,9 @@ class RandomAIPlayer(Player):
 
     def decide_slider(self, max_value: int) -> int:
         """Случайное количество монет от 0 до max_value."""
-        return random.randint(0, max_value)
+        result = random.randint(0, max_value)
+        self._log("slider", f"[0..{max_value}]", result)
+        return result
 
     # ------------------------------------------------------------------
     # Инвентаризация / налог / сброс
@@ -140,17 +198,34 @@ class RandomAIPlayer(Player):
 
     def decide_inventory_keep(self, cards) -> int:
         """Индекс карты, которую оставить."""
-        return random.randrange(len(cards))
+        result = random.randrange(len(cards))
+        self._log(
+            "inventory_keep",
+            [c.name for c in cards],
+            cards[result].name,
+        )
+        return result
 
     def decide_tax_card(self, can_afford: bool) -> int:
         """0 — заплатить, 1 — сбросить карту."""
         if not can_afford:
-            return 1
-        return random.randint(0, 1)
+            result = 1
+            available = ["discard"]
+        else:
+            result = random.randint(0, 1)
+            available = ["pay", "discard"]
+        self._log("tax_card", available, ["pay", "discard"][result])
+        return result
 
     def decide_card_to_discard(self, cards) -> int:
         """Индекс карты для сброса."""
-        return random.randrange(len(cards))
+        result = random.randrange(len(cards))
+        self._log(
+            "card_to_discard",
+            [c.name for c in cards],
+            cards[result].name,
+        )
+        return result
 
     # ------------------------------------------------------------------
     # Расстановка мин (двухслойный рандом)
@@ -165,10 +240,12 @@ class RandomAIPlayer(Player):
                 самого дальнего врага.
         """
         if self.coins <= 0:
+            self._log("mine_placement", "no_coins", [])
             return set()
 
         n_mines = random.randint(0, self.coins)
         if n_mines == 0:
+            self._log("mine_placement", f"coins={self.coins}", [])
             return set()
 
         # Клетки строго правее самого дальнего врага
@@ -185,6 +262,13 @@ class RandomAIPlayer(Player):
 
         k = min(n_mines, len(candidates))
         if k == 0:
+            self._log("mine_placement", f"no_candidates, frontier={frontier}", [])
             return set()
 
-        return set(random.sample(candidates, k))
+        result = set(random.sample(candidates, k))
+        self._log(
+            "mine_placement",
+            f"candidates={len(candidates)}, frontier={frontier}, coins={self.coins}, want={n_mines}",
+            sorted(result),
+        )
+        return result
