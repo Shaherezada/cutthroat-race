@@ -10,8 +10,8 @@ from ui.game_session import GameSession, WINDOW_SIZE
 # Порядок = порядок ходов. Минимум 2 игрока.
 # ------------------------------------------------------------------
 PLAYER_CONFIG = [
-    "human",
     "ai",
+    "human",
 ]
 
 

@@ -117,8 +117,8 @@ class GameSession:
                 eng.end_turn_checks(p)
                 p.end_checks_done = True
             if not eng.pending_events:
-                if p.has_extra_turn:
-                    p.has_extra_turn = False
+                if p.has_extra_turn > 0:
+                    p.has_extra_turn -= 1
                     p.reset_turn_flags()
                 else:
                     eng.state.next_turn(self.logger)
@@ -152,6 +152,7 @@ class GameSession:
             "INVENTORY_KEEP":         self._open_inventory_keep,
             "TAX_SHOP_CARD":          self._open_tax_shop_card,
             "CHOOSE_CARD_TO_DISCARD": self._open_choose_card_to_discard,
+            "SWAP_CARD":              self._open_swap_card,
         }
         handler = handlers.get(ev.type)
         if handler:
@@ -193,7 +194,7 @@ class GameSession:
 
     def _resolve_shop_give(self, ev, ep):
         card = ev.data["card"]
-        ep.add_card(card)
+        self.engine.give_card_to_player(ep, card)
         self.engine.logger.log_event(ep.uid, "SHOP_FREE", {"card": card.name})
         self.engine.pending_events.pop(0)
 
@@ -229,13 +230,14 @@ class GameSession:
             if ep.coins >= 10: opts.append("Сбросить 10 монет (+2 к броску)")
             self.ui.active_dialog = Dialog(f"{ep.name}: Финиш-сейф! Нужно 6+", opts)
 
-    def _open_red_choice(self, ev, ep):
+    def _open_red_choice(self, _ev, ep):
         if self._is_ai(ep):
             choice = ep.decide_red_choice()
             if choice == 0:
                 ep.pay(3)
             else:
                 self.engine.move_player(ep, 3, is_forward=False)
+                self.engine.logger.log_event(ep.uid, "RED_CHOICE", {"choice": ["lose_coins", "move_back"][choice]})
             self.engine.pending_events.pop(0)
             return
         self.ui.active_dialog = Dialog(f"{ep.name}: Красная западня",
@@ -356,6 +358,16 @@ class GameSession:
             return
         self.ui.pending_shop_cards = ev.data["cards"]
 
+    def _open_swap_card(self, ev, ep):
+        new_card = ev.data["new_card"]
+        if self._is_ai(ep):
+            replace_idx = ep.decide_swap(len(ep.hand))
+            self.engine.resolve_swap_card(ep, new_card, replace_idx if replace_idx < len(ep.hand) else None)
+            self.engine.pending_events.pop(0)
+            return
+        # для человека — показываем текущую руку, даём выбрать что заменить
+        self.ui.pending_shop_cards = list(ep.hand)
+
     # ------------------------------------------------------------------
     # Обработка ввода (только для людей)
     # ------------------------------------------------------------------
@@ -372,7 +384,7 @@ class GameSession:
                     self._handle_event_card_sidebar(event)
                 continue  # всё остальное пока карта на экране не нужно
 
-            if self._is_ai():
+            if self._is_ai() and not self.ui.active_dialog:
                 continue
 
             if self.ui.active_slider:
@@ -475,6 +487,11 @@ class GameSession:
             elif ev.type == "INVENTORY_KEEP":
                 actual = choice if choice < len(ui.pending_shop_cards) else 0
                 eng.resolve_inventory_keep(ev.player, actual)
+            elif ev.type == "SWAP_CARD":
+                new_card = ev.data["new_card"]
+                is_skip = (i == len(ui.pending_shop_cards))  # последняя кнопка — «Пропустить»
+                replace_idx = None if is_skip else i
+                self.engine.resolve_swap_card(ev.player, new_card, replace_idx)
             eng.pending_events.pop(0)
             ui.clear_card_selection()
             break
@@ -531,8 +548,11 @@ class GameSession:
         elif "Финиш-сейф" in title:
             self._resolve_finish_roll(i, ep, ev)
         elif "западня" in title:
-            if i == 0: ep.pay(3)
-            else: eng.move_player(ep, 3, is_forward=False)
+            if i == 0:
+                ep.pay(3)
+            else:
+                eng.move_player(ep, 3, is_forward=False)
+            eng.logger.log_event(ep.uid, "RED_CHOICE", {"choice": ["lose_coins", "move_back"][i]})
             ui.clear_dialog(); eng.pending_events.pop(0)
         elif "Смерч" in title:
             eng.resolve_tornado_choice(ep, i, ui.pending_tornado_target)
@@ -603,8 +623,8 @@ class GameSession:
                         eng.end_turn_checks(p)
                         p.end_checks_done = True
                     if not eng.pending_events:
-                        if p.has_extra_turn:
-                            p.has_extra_turn = False
+                        if p.has_extra_turn > 0:
+                            p.has_extra_turn -= 1
                             p.reset_turn_flags()
                         else:
                             eng.state.next_turn(self.logger)
@@ -653,7 +673,7 @@ class GameSession:
         if ui.viewing_card_sprite_id:
             r.draw_large_rule_card(ui.viewing_card_sprite_id, mouse_pos)
         elif eng.pending_events and eng.pending_events[0].type in (
-                "SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD", "INVENTORY_KEEP"):
+                "SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD", "INVENTORY_KEEP", "SWAP_CARD"):
             ev = eng.pending_events[0]
             if ev.type == "SHOP":
                 title = "Лавка Джо: выбери карту (5 монет)"
@@ -661,11 +681,15 @@ class GameSession:
                 title = "Бесплатная карта Лавки Джо"
             elif ev.type == "CHOOSE_CARD_TO_DISCARD":
                 title = f"Сбрось карту у {ev.data['target'].name}"
+            elif ev.type == "SWAP_CARD":
+                title = f"Выбери карту для замены на «{ev.data['new_card'].name}»"
             else:
                 title = f"Инвентаризация: {ev.player.name} — выбери карту, которую оставишь"
             ui.pending_selection_rects = r.draw_card_selector(
-                ev.data["cards"], title, mouse_pos,
-                show_skip=(ev.type not in ("SHOP_FREE", "CHOOSE_CARD_TO_DISCARD"))
+                ev.data["cards"] if ev.type != "SWAP_CARD" else list(ev.player.hand),
+                title, mouse_pos,
+                show_skip=(ev.type not in ("CHOOSE_CARD_TO_DISCARD", "SHOP_FREE"))
+                # «Пропустить» есть везде кроме принудительного сброса
             )
         else:
             r.draw_hover(mouse_pos)

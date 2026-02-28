@@ -16,7 +16,7 @@ class Player:
         self.used_cards_indices: Set[int] = set()
 
         self.skip_next_turn: bool = False
-        self.has_extra_turn: bool = False
+        self.has_extra_turn: int = 0
         self.pending_extra_turn: bool = False # флаг, который переживёт reset_turn_flags() при смене хода
 
         self.has_moved = False # Совершил ли игрок основной бросок кубика
@@ -55,7 +55,6 @@ class Player:
         """Вызывается в начале хода"""
         self.used_cards_indices.clear()
         self.has_moved = False
-        self.has_extra_turn = False
         self.turn_checks_done = False
         self.end_checks_done = False
 

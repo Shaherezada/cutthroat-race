@@ -37,21 +37,26 @@ class RandomAIPlayer(Player):
                 continue
             # Проверяем, есть ли подходящая цель для атакующих карт
             eid = card.effect_id
-            if eid in ("attack_hook", "move_harpoon"):
+            if eid in ("move_harpoon",):
                 targets = [o for o in opponents
                            if not o.is_finished and 0 < (o.position - self.position) <= 10]
-                if not targets:
-                    continue
-            elif eid in ("attack_grenade", "attack_voodoo"):
+                if not targets: continue
+            elif eid == "attack_hook":
+                targets = [o for o in opponents
+                           if 0 < (o.position - self.position) <= 10]
+                if not targets: continue
+            elif eid in ("attack_grenade",):
                 targets = [o for o in opponents
                            if not o.is_finished and o.position > self.position]
-                if not targets:
-                    continue
+                if not targets: continue
+            elif eid == "attack_voodoo":
+                targets = [o for o in opponents
+                           if o.position > self.position]
+                if not targets: continue
             elif eid == "attack_hand_fate":
                 targets = [o for o in opponents
                            if not o.is_finished and o.position > 0]
-                if not targets:
-                    continue
+                if not targets: continue
             available.append(i)
 
         # Список вариантов: все доступные карты + «бросить кубики»
@@ -79,12 +84,18 @@ class RandomAIPlayer(Player):
         return result
 
     def _pick_target(self, effect_id: str, opponents: List[Player]) -> Optional[int]:
-        if effect_id in ("attack_hook", "move_harpoon"):
+        if effect_id == "move_harpoon":
             valid = [o for o in opponents
                      if not o.is_finished and 0 < (o.position - self.position) <= 10]
-        elif effect_id in ("attack_grenade", "attack_voodoo"):
+        elif effect_id == "attack_hook":
+            valid = [o for o in opponents
+                     if 0 < (o.position - self.position) <= 10]
+        elif effect_id in ("attack_grenade",):
             valid = [o for o in opponents
                      if not o.is_finished and o.position > self.position]
+        elif effect_id == "attack_voodoo":
+            valid = [o for o in opponents
+                     if o.position > self.position]
         elif effect_id == "attack_hand_fate":
             valid = [o for o in opponents
                      if not o.is_finished and o.position > 0]
@@ -225,6 +236,13 @@ class RandomAIPlayer(Player):
             [c.name for c in cards],
             cards[result].name,
         )
+        return result
+
+    def decide_swap(self, hand_size: int) -> int:
+        """0..hand_size-1 — заменить эту карту; hand_size — пропустить."""
+        result = random.randint(0, hand_size)  # включая "пропустить"
+        labels = [f"replace[{i}]" for i in range(hand_size)] + ["skip"]
+        self._log("swap_card", labels, labels[result])
         return result
 
     # ------------------------------------------------------------------

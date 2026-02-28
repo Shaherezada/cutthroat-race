@@ -35,7 +35,7 @@ class GameEngine:
         if count == 2 and rolls[0] == rolls[1]:
             for rule in self.state.active_rules:
                 if rule.effect_id == "rule_double_reroll":
-                    player.has_extra_turn = True
+                    player.has_extra_turn += 1
                     self.logger.log_event(player.uid, "RULE_TRIGGER", {
                         "rule": rule.name, "rolls": rolls, "extra_turn": True
                     })
@@ -92,8 +92,12 @@ class GameEngine:
                 continue
 
             eid = card.effect_id
-            if eid in ["attack_hook", "move_harpoon"]:
+            if eid == "move_harpoon":
                 if any(not o.is_finished and 0 < (o.position - player.position) <= 10 for o in opponents):
+                    return True
+            elif eid == "attack_hook":
+                all_opps = [o for o in self.state.players if o.uid != player.uid]
+                if any(0 < (o.position - player.position) <= 10 for o in all_opps):
                     return True
             elif eid == "attack_grenade":
                 if any(not o.is_finished and o.position > player.position for o in opponents):
@@ -102,7 +106,8 @@ class GameEngine:
                 if any(not o.is_finished and o.position > 0 for o in opponents):
                     return True
             elif eid == "attack_voodoo":
-                if any(not o.is_finished and o.position > player.position for o in opponents):
+                all_opps = [o for o in self.state.players if o.uid != player.uid]
+                if any(o.position > player.position for o in all_opps):
                     return True
             else:
                 return True
@@ -144,6 +149,11 @@ class GameEngine:
             self.logger.log_event(player.uid, "MOVE", {
                 "steps": actual_steps, "to": target_pos
             })
+            if apply_effects and player.position in self.placed_mines:
+                self.placed_mines.pop(player.position)
+                player.skip_next_turn = True
+                self.logger.log_event(player.uid, "MINE_TRIGGERED", {"position": player.position})
+                return
             cell = self.board.get_cell(player.position)
             if cell.type == CellType.PORTAL and cell.portal_target is not None:
                 old_pos = player.position
@@ -159,22 +169,13 @@ class GameEngine:
     def _handle_landing(self, player: Player):
         cell = self.board.get_cell(player.position)
 
-        # 1. Проверка мин (подрывается даже владелец)
-        if player.position in self.placed_mines:
-            self.placed_mines.pop(player.position)
-            player.skip_next_turn = True
-            self.logger.log_event(player.uid, "MINE_TRIGGERED", {
-                "position": player.position
-            })
-            return # Эффект клетки не срабатывает
-
-        # 2. Проверка пассивных предметов Лавки Джо
+        # 1. Проверка пассивных предметов Лавки Джо
         self._check_passives(player, cell)
 
-        # 3. Проверка глобальных правил (Та-Дам)
+        # 2. Проверка глобальных правил (Та-Дам)
         self._check_global_rules(player, cell)
 
-        # 4. Активация механики клетки
+        # 3. Активация механики клетки
         self._trigger_cell_effect(player, cell)
 
     def _check_passives(self, player: Player, cell):
@@ -212,7 +213,7 @@ class GameEngine:
             return True
         if player.pending_extra_turn:
             player.pending_extra_turn = False
-            player.has_extra_turn = True
+            player.has_extra_turn += 1
 
         is_last = self._is_last(player)
 
@@ -295,8 +296,8 @@ class GameEngine:
         self._do_next_turn(player)
 
     def _do_next_turn(self, player: Player):
-        if player.has_extra_turn:
-            player.has_extra_turn = False
+        if player.has_extra_turn > 0:
+            player.has_extra_turn -= 1
             player.reset_turn_flags()
         else:
             self.state.next_turn(self.logger)
@@ -341,7 +342,7 @@ class GameEngine:
                 elif eid == "rule_green_move":
                     self.move_player(player, rule.value)
                 elif eid == "rule_green_extra_turn":
-                    player.has_extra_turn = True
+                    player.has_extra_turn += 1
                     self.logger.log_event(player.uid, "RULE_GREEN_EXTRA", {})
 
             # Правила, требующие сложной проверки контекста
@@ -445,6 +446,7 @@ class GameEngine:
 
             # 3. Та-Дам — показываем через очередь
             new_rule = self.state.deck_tadam.draw(1)[0]
+            self.logger.log_event(player.uid, "TADAM_DRAWN", {"rule": new_rule.name})
             self.pending_events.append(GameEvent(
                 type="TADAM_SHOW", player=player,
                 data={"rule": new_rule}
@@ -520,7 +522,7 @@ class GameEngine:
         if choice_idx < 2:
             card = cards[choice_idx]
             if player.pay(5):
-                player.add_card(card)
+                self.give_card_to_player(player, card)
                 self.logger.log_event(player.uid, "SHOP_BUY", {
                     "card": card.name,
                     "cost": 5
@@ -537,7 +539,7 @@ class GameEngine:
         """Бесплатный выбор карты из Лавки Джо"""
         if choice_idx < 2:
             card = cards[choice_idx]
-            player.add_card(card)
+            self.give_card_to_player(player, card)
             self.logger.log_event(player.uid, "SHOP_FREE", {
                 "card": card.name,
             })
@@ -710,6 +712,28 @@ class GameEngine:
         player.used_cards_indices = {0} if was_used else set()
         self.logger.log_event(player.uid, "INVENTORY_KEEP", {"kept": kept.name})
 
+    def give_card_to_player(self, player: Player, card: ShopCard):
+        """Добавляет карту в руку. Если полна — создаёт событие выбора замены."""
+        if not player.add_card(card):
+            self.pending_events.append(GameEvent(
+                type="SWAP_CARD",
+                player=player,
+                data={"new_card": card}
+            ))
+
+    def resolve_swap_card(self, player: Player, new_card: ShopCard, replace_idx):
+        """replace_idx=None — новая карта сгорает; иначе — заменяет карту в руке."""
+        if replace_idx is not None and 0 <= replace_idx < len(player.hand):
+            old = player.hand[replace_idx]
+            player.hand[replace_idx] = new_card
+            self.state.deck_shop.discard(old)
+            self.logger.log_event(player.uid, "SWAP_CARD", {
+                "new": new_card.name, "dropped": old.name
+            })
+        else:
+            self.state.deck_shop.discard(new_card)
+            self.logger.log_event(player.uid, "SWAP_CARD_SKIP", {"discarded": new_card.name})
+
     def use_card_from_hand(self, player_idx: int, card_idx: int, target_idx: Optional[int] = None) -> bool:
         player = self.state.players[player_idx]
         card = player.hand[card_idx]
@@ -719,8 +743,11 @@ class GameEngine:
         if card_idx in player.used_cards_indices: return False
 
         eid = card.effect_id
-        if eid in ["attack_hook", "move_harpoon"]:
+        if eid == "move_harpoon":
             if not (target and not target.is_finished and 0 < (target.position - player.position) <= 10):
+                return False
+        elif eid == "attack_hook":
+            if not (target and 0 < (target.position - player.position) <= 10):  # is_finished не проверяем
                 return False
         elif eid == "attack_grenade":
             if not (target and not target.is_finished and target.position > player.position):
@@ -729,7 +756,7 @@ class GameEngine:
             if not (target and not target.is_finished and target.position > 0):
                 return False
         elif eid == "attack_voodoo":
-            if not (target and not target.is_finished and target.position > player.position):
+            if not (target and target.position > player.position):  # is_finished не проверяем
                 return False
 
         if not player.pay(card.use_cost): return False
@@ -787,13 +814,16 @@ class GameEngine:
             bonus = 1
         elif coin_bonus == 10 and player.pay(10):
             bonus = 2
+        cube_bonus = 1 if any(
+            c.effect_id == "passive_roll_plus_1" for c in player.hand
+        ) else 0
 
         roll = random.randint(1, 6)
-        total = roll + bonus
+        total = roll + bonus + cube_bonus
         success = total >= WINNING_ROLL
 
         self.logger.log_event(player.uid, "FINISH_ROLL", {
-            "roll": roll, "bonus": bonus, "total": total, "success": success
+            "roll": roll, "bonus": coin_bonus + cube_bonus, "total": total, "success": success
         })
 
         if success:

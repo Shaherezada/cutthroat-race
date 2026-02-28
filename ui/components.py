@@ -2,6 +2,16 @@ import pygame
 from pygame import MOUSEBUTTONUP, MOUSEMOTION
 
 
+def _plural_ru(n: int, one: str, few: str, many: str) -> str:
+    """Возвращает нужную форму слова для числа n"""
+    n = abs(n) % 100
+    if 11 <= n <= 19: return many
+    n %= 10
+    if n == 1: return one
+    if 2 <= n <= 4: return few
+    return many
+
+
 class Button:
     def __init__(self, x, y, w, h, text, color=(70, 70, 70)):
         self.rect = pygame.Rect(x, y, w, h)
@@ -156,13 +166,16 @@ class SliderDialog:
             y_offset += 25
 
         # Отображение текущего значения
-        value_text = f"{self.current_value} монет"
+        value_text = f"{self.current_value} {_plural_ru(self.current_value, 'монета', 'монеты', 'монет')}"
         value_surf = self.value_font.render(value_text, True, (255, 255, 255))
         screen.blit(value_surf, (self.rect.centerx - value_surf.get_width() // 2, self.rect.y + 130))
 
         # Результат
         result_value = self.current_value * self.multiplier
-        result_text = f"→ {result_value} клеток вперёд" if self.multiplier > 0 else f"→ {abs(result_value)} клеток назад"
+        rv = abs(result_value)
+        cell_word = _plural_ru(rv, 'клетка', 'клетки', 'клеток')
+        direction = "вперёд" if self.multiplier > 0 else "назад"
+        result_text = f"→ {rv} {cell_word} {direction}"
         result_surf = self.result_font.render(result_text, True,
                                               (100, 255, 100) if self.multiplier > 0 else (255, 100, 100))
         screen.blit(result_surf, (self.rect.centerx - result_surf.get_width() // 2, self.rect.y + 230))

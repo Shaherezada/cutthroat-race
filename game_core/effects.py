@@ -216,7 +216,7 @@ class EffectResolver:
 
     def _extra_turn_pay_coins(self, src, val, _tgt):
         if src.pay(val):
-            src.has_extra_turn = True
+            src.has_extra_turn += 1
             self.engine.logger.log_event(src.uid, "EXTRA_TURN_PAID", {"cost": val})
 
     # ------------------------------------------------------------------
@@ -311,8 +311,8 @@ class EffectResolver:
     def _t_roll_push_enemy(self, src, tgt, _val):
         roll = random.randint(1, 6)
         current_uid = self.engine.state.current_player.uid
-        self.engine.move_player(tgt, roll, apply_effects=(tgt.uid == current_uid))
         self.engine.logger.log_event(src.uid, "EFFECT_PUSH", {"target": tgt.name, "roll": roll})
+        self.engine.move_player(tgt, roll, apply_effects=(tgt.uid == current_uid))
 
     def _t_give_coins_to_target(self, src, tgt, val):
         amount = min(src.coins, val)
@@ -341,10 +341,8 @@ class EffectResolver:
             return
         if len(tgt.hand) == 1:
             card = tgt.remove_card(0)
-            if src.add_card(card):
-                self.engine.logger.log_event(src.uid, "EFFECT_STEAL_CARD", {"target": tgt.name, "card": card.name})
-            else:
-                self.engine.state.deck_shop.discard(card)
+            self.engine.give_card_to_player(src, card)
+            self.engine.logger.log_event(src.uid, "EFFECT_STEAL_CARD", {"target": tgt.name, "card": card.name})
         else:
             self.engine.pending_events.append(GameEvent(
                 type="CHOOSE_CARD_TO_DISCARD", player=src,
