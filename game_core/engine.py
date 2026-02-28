@@ -25,6 +25,7 @@ class GameEngine:
         self.placed_mines: Dict[int, int] = {} # Для хранения мин (карта Хорошо): {cell_id: owner_uid}
         self.pending_events: List[GameEvent] = []
         self.effects = EffectResolver(self)
+        self.move_callbacks: list = []
 
     def get_roll(self, player: Player) -> List[int]:
         pos = player.position
@@ -109,6 +110,9 @@ class GameEngine:
                 all_opps = [o for o in self.state.players if o.uid != player.uid]
                 if any(o.position > player.position for o in all_opps):
                     return True
+            elif eid == "move_rocket":
+                if not player.is_finished:
+                    return True
             else:
                 return True
         return False
@@ -140,6 +144,8 @@ class GameEngine:
                                     self.logger.log_event(player.uid, "RULE_OVERTAKE",
                                                           {"from": other.name, "amount": amount})
 
+        for cb in self.move_callbacks:
+            cb(player.uid, start_pos, target_pos)
         player.position = target_pos
 
         # Эффекты срабатывают только при движении ВПЕРЁД в свой ход
@@ -709,6 +715,7 @@ class GameEngine:
         for i, card in enumerate(player.hand):
             if i != keep_idx:
                 self.state.deck_shop.discard(card)
+        player.hand = [kept]
         player.used_cards_indices = {0} if was_used else set()
         self.logger.log_event(player.uid, "INVENTORY_KEEP", {"kept": kept.name})
 
@@ -777,6 +784,8 @@ class GameEngine:
                 data={"card": bad_card, "is_good": False}
             ))
         elif eid == "move_rocket":
+            if player.is_finished:
+                return False
             self.logger.log_event(player.uid, "CARD_ROCKET_USE", {"steps": card.value})
             self.move_player(player, card.value)
             if player.is_finished:

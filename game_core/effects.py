@@ -346,7 +346,7 @@ class EffectResolver:
         else:
             self.engine.pending_events.append(GameEvent(
                 type="CHOOSE_CARD_TO_DISCARD", player=src,
-                data={"target": tgt, "cards": tgt.hand}
+                data={"target": tgt, "cards": tgt.hand, "steal": True}
             ))
 
     def _t_skip_turn_mutual(self, src, tgt, _val):

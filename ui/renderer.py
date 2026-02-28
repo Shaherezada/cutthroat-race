@@ -94,31 +94,35 @@ class Renderer:
             pygame.draw.circle(overlay, (255, 255, 255, 80), (50, 50), 40)
             self.screen.blit(overlay, (pos[0] - 50, pos[1] - 50))
 
-    def draw_players(self, state: GameState):
-        # Группируем игроков по позициям
-        pos_groups = {}
-        for p in state.players:
-            pos_groups.setdefault(p.position, []).append(p)
+    def draw_players(self, state: GameState, animator=None):
+        animating = animator and animator.is_animating
 
-        for position, players in pos_groups.items():
-            base_pos = self.view_cfg.get_screen_coords(position)
-            count = len(players)
+        if animating:
+            # При активной анимации — рисуем каждого по отдельности
+            for player in state.players:
+                visual = animator.get_visual_pos(player.uid)
+                pos = visual if visual else self.view_cfg.get_screen_coords(player.position)
+                self._draw_one_player(player, pos)
+        else:
+            # Штатная группировка при совпадении клеток
+            pos_groups: dict = {}
+            for p in state.players:
+                pos_groups.setdefault(p.position, []).append(p)
 
-            for i, player in enumerate(players):
-                # Если игрок один - смещение 0. Если много - считаем смещение
-                if count > 1:
-                    offset_x = (i - (count - 1) / 2) * 25
-                    offset_y = (i % 2) * 10
-                else:
-                    offset_x, offset_y = 0, 0
+            for position, players in pos_groups.items():
+                base = self.view_cfg.get_screen_coords(position)
+                count = len(players)
+                for i, player in enumerate(players):
+                    ox = (i - (count - 1) / 2) * 25 if count > 1 else 0
+                    oy = (i % 2) * 10 if count > 1 else 0
+                    self._draw_one_player(player, (base[0] + ox, base[1] + oy))
 
-                final_pos = (base_pos[0] + offset_x, base_pos[1] + offset_y)
-                color = self.player_colors[player.uid % len(self.player_colors)]
-
-                pygame.draw.circle(self.screen, (0, 0, 0), final_pos, 18) # Обводка
-                pygame.draw.circle(self.screen, color, final_pos, 15)
-                txt = self.font.render(str(player.uid + 1), True, (255, 255, 255))
-                self.screen.blit(txt, (final_pos[0] - 5, final_pos[1] - 10))
+    def _draw_one_player(self, player, pos):
+        color = self.player_colors[player.uid % len(self.player_colors)]
+        pygame.draw.circle(self.screen, (0, 0, 0), pos, 18)
+        pygame.draw.circle(self.screen, color, pos, 15)
+        txt = self.font.render(str(player.uid + 1), True, (255, 255, 255))
+        self.screen.blit(txt, (pos[0] - 5, pos[1] - 10))
 
     def draw_sidebar(self, state: GameState, turn_count: int, elapsed_seconds: int,
                      can_do_actions: bool = False, has_pending: bool = False):

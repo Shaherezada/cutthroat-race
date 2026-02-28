@@ -3,7 +3,9 @@ import sys
 from game_core.ai import RandomAIPlayer
 from game_core.logger import GameLogger
 from game_core.state import Player
+import ui.animator as _animator
 from ui.game_session import GameSession, WINDOW_SIZE
+
 
 # ------------------------------------------------------------------
 # Конфигурация игроков: "human" или "ai"
@@ -13,6 +15,9 @@ PLAYER_CONFIG = [
     "ai",
     "human",
 ]
+# ── Включить/выключить анимацию движения фишек ──────────────────────
+ENABLE_ANIMATION = True
+_animator.ANIMATION_ENABLED = ENABLE_ANIMATION
 
 
 def create_players(config: list) -> list:

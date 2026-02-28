@@ -3,6 +3,7 @@ from game_core.ai import RandomAIPlayer
 from game_core.engine import GameEngine, GameEvent
 from game_core.logger import GameLogger
 from game_core.state import Player
+from ui.animator import Animator
 from ui.renderer import Renderer
 from ui.view_config import ViewConfig
 from ui.ui_state import UIState
@@ -35,6 +36,10 @@ class GameSession:
             if isinstance(p, RandomAIPlayer):
                 p.logger = logger
 
+        self.animator = Animator(view_cfg)
+        self.engine.move_callbacks.append(self._on_move)
+        self._prev_tick_ms = pygame.time.get_ticks()
+
     @property
     def p(self):
         return self.engine.state.current_player
@@ -46,8 +51,14 @@ class GameSession:
     def _is_ai(self, player: Player = None) -> bool:
         return isinstance(player or self.p, RandomAIPlayer)
 
+    def _on_move(self, uid: int, from_pos: int, to_pos: int):
+        self.animator.start_move(uid, from_pos, to_pos)
+
     def tick(self, events: list, mouse_pos: tuple, elapsed_seconds: int, turn_count: int):
         self._process_pending_events()
+        now = pygame.time.get_ticks()
+        self.animator.tick(now - self._prev_tick_ms)
+        self._prev_tick_ms = now
 
         # Авто-закрытие карты события по таймеру (AI-игрок)
         ui = self.ui
@@ -62,10 +73,12 @@ class GameSession:
             ui.event_card_ok_rect = None
             ui.event_card_auto_close_at = None
 
-        if not self.ui.is_busy and not self.engine.pending_events:
+        _busy = self.ui.is_busy or self.animator.is_animating
+
+        if not _busy and not self.engine.pending_events:
             self.engine.try_advance_turn(self.p)
 
-        if self._is_ai() and not self.ui.is_busy:
+        if self._is_ai() and not _busy:
             self._ai_tick()
 
         self.handle_input(events, mouse_pos)
@@ -384,7 +397,13 @@ class GameSession:
                     self._handle_event_card_sidebar(event)
                 continue  # всё остальное пока карта на экране не нужно
 
-            if self._is_ai() and not self.ui.active_dialog:
+            ev_pending = self.engine.pending_events[0] if self.engine.pending_events else None
+            is_ai_turn = self._is_ai() and not self.ui.active_dialog
+            is_human_card_event = (ev_pending is not None
+                                   and ev_pending.type in ("INVENTORY_KEEP", "SWAP_CARD",
+                                                           "CHOOSE_CARD_TO_DISCARD", "SHOP", "SHOP_FREE")
+                                   and not self._is_ai(ev_pending.player))
+            if is_ai_turn and not is_human_card_event:
                 continue
 
             if self.ui.active_slider:
@@ -400,7 +419,7 @@ class GameSession:
                 continue
 
             ev = self.engine.pending_events[0] if self.engine.pending_events else None
-            if ev and ev.type in ("SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD", "INVENTORY_KEEP"):
+            if ev and ev.type in ("SHOP", "SHOP_FREE", "CHOOSE_CARD_TO_DISCARD", "INVENTORY_KEEP", "SWAP_CARD"):
                 self._handle_card_selection(event, mouse_pos, ev)
                 continue
 
@@ -668,7 +687,7 @@ class GameSession:
         r.draw_board()
         r.draw_active_rules(eng.state.active_rules)
         r.draw_mines(eng.placed_mines)
-        r.draw_players(eng.state)
+        r.draw_players(eng.state, self.animator)
 
         if ui.viewing_card_sprite_id:
             r.draw_large_rule_card(ui.viewing_card_sprite_id, mouse_pos)
