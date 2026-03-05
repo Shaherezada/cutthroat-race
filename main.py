@@ -7,6 +7,7 @@ import ui.animator as _animator
 from ui.game_session import GameSession, WINDOW_SIZE
 
 
+WINNER_SCREEN_WAIT = 10_000
 # ------------------------------------------------------------------
 # Конфигурация игроков: "human" или "ai"
 # Порядок = порядок ходов. Минимум 2 игрока.
@@ -57,9 +58,11 @@ def main():
 
         session.tick(events, mouse_pos, elapsed, turn_count)
 
-        if session.engine.is_game_over and session.engine.winner:
+        if (session.engine.is_game_over
+                and session.engine.winner
+                and not session.animator.is_animating):
             _draw_winner(screen, session.engine.winner)
-            pygame.time.wait(3000)
+            pygame.time.wait(WINNER_SCREEN_WAIT)
             running = False
 
         pygame.display.flip()

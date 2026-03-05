@@ -501,15 +501,9 @@ class GameEngine:
                 ))
 
         elif ctype == CellType.MINE:
-            roll = random.randint(1, 6)
-            if roll == 1:
-                player.skip_next_turn = True
-            elif roll == 6:
-                self.is_game_over = True
-                self.winner = player
-            else:
-                player.add_coins(10)
-            self.logger.log_event(player.uid, "MINE_ROLL", {"roll": roll})
+            self.pending_events.append(GameEvent(
+                type="MINE_ROLL_WAIT", player=player, data={}
+            ))
 
         elif ctype == CellType.OH_NO:
             amount = min(player.coins, 10)
@@ -740,6 +734,18 @@ class GameEngine:
         else:
             self.state.deck_shop.discard(new_card)
             self.logger.log_event(player.uid, "SWAP_CARD_SKIP", {"discarded": new_card.name})
+
+    def resolve_mine_roll(self, player: Player) -> int:
+        roll = random.randint(1, 6)
+        if roll == 1:
+            player.skip_next_turn = True
+        elif roll == 6:
+            self.is_game_over = True
+            self.winner = player
+        else:
+            player.add_coins(10)
+        self.logger.log_event(player.uid, "MINE_ROLL", {"roll": roll})
+        return roll
 
     def use_card_from_hand(self, player_idx: int, card_idx: int, target_idx: Optional[int] = None) -> bool:
         player = self.state.players[player_idx]

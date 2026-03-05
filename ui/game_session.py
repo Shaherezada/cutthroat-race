@@ -55,10 +55,13 @@ class GameSession:
         self.animator.start_move(uid, from_pos, to_pos)
 
     def tick(self, events: list, mouse_pos: tuple, elapsed_seconds: int, turn_count: int):
-        self._process_pending_events()
         now = pygame.time.get_ticks()
         self.animator.tick(now - self._prev_tick_ms)
         self._prev_tick_ms = now
+
+        # Обрабатываем события только ПОСЛЕ завершения анимации
+        if not self.animator.is_animating:
+            self._process_pending_events()
 
         # Авто-закрытие карты события по таймеру (AI-игрок)
         ui = self.ui
@@ -66,8 +69,18 @@ class GameSession:
                 and ui.event_card_auto_close_at is not None
                 and pygame.time.get_ticks() >= ui.event_card_auto_close_at):
             ev = self.engine.pending_events[0]
+
+            events_after = len(self.engine.pending_events) - 1  # ← добавить
+
             self.engine.resolve_event_card(ev.player, ui.pending_event_card, ui.pending_event_is_good)
             self.engine.pending_events.pop(0)
+
+            # Если эффект породил новые события — вытащить их в начало очереди
+            if len(self.engine.pending_events) > events_after:  # ← добавить
+                newly_added = self.engine.pending_events[events_after:]  # ← добавить
+                pre_planned = self.engine.pending_events[:events_after]  # ← добавить
+                self.engine.pending_events = newly_added + pre_planned  # ← добавить
+
             ui.pending_event_card = None
             ui.showing_event_card_sidebar = False
             ui.event_card_ok_rect = None
@@ -155,6 +168,7 @@ class GameSession:
             "SHOP_GIVE":              self._resolve_shop_give,
             "EVENT_CARD":             self._open_event_card,
             "FINISH_ROLL":            self._open_finish_roll,
+            "MINE_ROLL_WAIT":         self._open_mine_roll_wait,
             "RED_CHOICE":             self._open_red_choice,
             "TADAM_SHOW":             self._open_tadam,
             "DUEL_CHOOSE_OPPONENT":   self._open_duel_choose_opponent,
@@ -242,6 +256,12 @@ class GameSession:
             opts = ["Бросить (без бонуса)", "Сбросить 5 монет (+1 к броску)"]
             if ep.coins >= 10: opts.append("Сбросить 10 монет (+2 к броску)")
             self.ui.active_dialog = Dialog(f"{ep.name}: Финиш-сейф! Нужно 6+", opts)
+
+    def _open_mine_roll_wait(self, ev, ep):
+        """Для AI бросаем сразу, для человека ждём Пробел"""
+        if self._is_ai(ep):
+            self.engine.resolve_mine_roll(ep)
+            self.engine.pending_events.pop(0)
 
     def _open_red_choice(self, _ev, ep):
         if self._is_ai(ep):
@@ -621,6 +641,11 @@ class GameSession:
         p, p_idx = self.p, self.p_idx
 
         if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+            ev_top = eng.pending_events[0] if eng.pending_events else None
+            if ev_top and ev_top.type == "MINE_ROLL_WAIT" and ev_top.player.uid == p.uid:
+                eng.resolve_mine_roll(p)
+                eng.pending_events.pop(0)
+                return
             if not eng.pending_events and not p.has_moved and p.turn_checks_done:
                 if p.is_finished:
                     eng.pending_events.append(GameEvent(type="FINISH_ROLL", player=p, data={}))
